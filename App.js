@@ -1,20 +1,30 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { BookingProvider } from './context/BookingContext';
 
-export default function App() {
+import HomeScreen from './screens/HomeScreen';
+import TimeSlotScreen from './screens/TimeSlotScreen';
+import RequirementScreen from './screens/RequirementScreen';
+import ConfirmationScreen from './screens/ConfirmationScreen';
+import AdminScreen from './screens/AdminScreen';
+
+const Stack = createNativeStackNavigator();
+
+const App = () => {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <BookingProvider>
+      <NavigationContainer>
+        <Stack.Navigator>
+          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="TimeSlot" component={TimeSlotScreen} />
+          <Stack.Screen name="Requirements" component={RequirementScreen} />
+          <Stack.Screen name="Confirmation" component={ConfirmationScreen} />
+          <Stack.Screen name="Admin" component={AdminScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </BookingProvider>
   );
-}
+};
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default App;
