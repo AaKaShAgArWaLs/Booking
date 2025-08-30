@@ -8,12 +8,32 @@ import {
   ScrollView,
   SafeAreaView,
   TouchableOpacity,
+  Dimensions,
 } from 'react-native';
 import { globalStyles } from '../styles/globalStyles';
 import { colors } from '../styles/colors';
 import { typography } from '../styles/typography';
 import { useBooking } from '../context/BookingContext';
 import bookingAPI from '../services/bookingApi';
+
+const { width, height } = Dimensions.get('window');
+
+// Responsive breakpoints
+const isTablet = width >= 768;
+const isLargeScreen = width >= 1024;
+const isSmallScreen = width < 400;
+
+// Responsive helper functions
+const getResponsiveValue = (small, medium, large) => {
+  if (isLargeScreen) return large;
+  if (isTablet) return medium;
+  return small;
+};
+
+const getHallCardWidth = () => {
+  if (isLargeScreen) return (width - 80) / 2; // 2 columns on large screens
+  return width - 40; // Single column on smaller screens
+};
 
 const HomeScreen = ({ navigation }) => {
   const { selectHall } = useBooking();
@@ -44,6 +64,13 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const handleHallSelect = (hall) => {
+    if (!hall.isAvailable) {
+      Alert.alert(
+        "Hall Unavailable", 
+        `${hall.name} is currently unavailable for booking. Please select another hall or contact admin for assistance.`
+      );
+      return;
+    }
     selectHall(hall);
     navigation.navigate('TimeSlot');
   };
@@ -63,40 +90,73 @@ const HomeScreen = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
+          <Text style={styles.welcomeText}>Welcome to</Text>
           <Text style={styles.title}>Seminar Hall Booking</Text>
+          <Text style={styles.subtitle}>Choose your perfect venue</Text>
         </View>
 
-        <View style={styles.hallsContainer}>
+        <View style={[styles.hallsContainer, isLargeScreen && styles.hallsContainerLarge]}>
           {halls && halls.length > 0 ? (
             halls.map((hall) => (
               <TouchableOpacity
                 key={hall.id}
-                style={[globalStyles.card, styles.hallCard]}
+                style={[
+                  globalStyles.card, 
+                  styles.hallCard,
+                  isLargeScreen && { width: getHallCardWidth(), marginHorizontal: 10 }
+                ]}
                 onPress={() => handleHallSelect(hall)}
                 activeOpacity={0.8}
               >
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Hall:</Text>
-                  <Text style={styles.summaryValue}>{hall.name}</Text>
+                <View style={styles.cardHeader}>
+                  <View style={styles.hallIcon}>
+                    <Text style={styles.hallIconText}>🏛️</Text>
+                  </View>
+                  <View style={styles.hallInfo}>
+                    <Text style={styles.hallName}>{hall.name}</Text>
+                    <Text style={styles.hallLocation}>📍 {hall.location}</Text>
+                  </View>
+                  <View style={[
+                    styles.statusBadge,
+                    hall.isAvailable ? styles.availableStatusBadge : styles.unavailableStatusBadge
+                  ]}>
+                    <Text style={[
+                      styles.statusText,
+                      hall.isAvailable ? styles.availableStatusText : styles.unavailableStatusText
+                    ]}>
+                      {hall.isAvailable ? 'Available' : 'Unavailable'}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Location:</Text>
-                  <Text style={styles.summaryValue}>{hall.location}</Text>
+
+                <View style={styles.capacitySection}>
+                  <View style={styles.capacityItem}>
+                    <Text style={styles.capacityIcon}>👥</Text>
+                    <Text style={styles.capacityText}>{hall.capacity}</Text>
+                    <Text style={styles.capacityLabel}>People</Text>
+                  </View>
                 </View>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Capacity:</Text>
-                  <Text style={styles.summaryValue}>{hall.capacity} people</Text>
-                </View>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Status:</Text>
-                  <Text style={[styles.summaryValue, { color: colors.success }]}>Available</Text>
-                </View>
+
                 {hall.description && (
-                  <View style={styles.descriptionContainer}>
-                    <Text style={styles.summaryLabel}>Description:</Text>
-                    <Text style={styles.description}>{hall.description}</Text>
+                  <View style={styles.descriptionSection}>
+                    <Text style={styles.descriptionText}>{hall.description}</Text>
                   </View>
                 )}
+
+                <View style={styles.cardFooter}>
+                  <Text style={[
+                    styles.tapToBook,
+                    !hall.isAvailable && styles.unavailableText
+                  ]}>
+                    {hall.isAvailable ? 'Tap to book this hall' : 'Hall currently unavailable'}
+                  </Text>
+                  <Text style={[
+                    styles.arrow,
+                    !hall.isAvailable && styles.unavailableText
+                  ]}>
+                    {hall.isAvailable ? '→' : '⚠️'}
+                  </Text>
+                </View>
               </TouchableOpacity>
             ))
           ) : (
@@ -133,51 +193,154 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   header: {
-    padding: 20,
-    paddingBottom: 10,
+    padding: getResponsiveValue(16, 20, 32),
+    paddingBottom: getResponsiveValue(8, 10, 16),
+    alignItems: 'center',
+  },
+  welcomeText: {
+    ...typography.small,
+    color: colors.textLight,
+    textAlign: 'center',
+    marginBottom: 4,
   },
   title: {
-    ...typography.h2,
-    color: colors.text,
-    marginBottom: 16,
+    fontSize: getResponsiveValue(24, 28, 32),
+    color: colors.primary,
     textAlign: 'center',
+    fontWeight: 'bold',
+    marginBottom: getResponsiveValue(6, 8, 10),
+  },
+  subtitle: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.textLight,
+    textAlign: 'center',
+    marginBottom: getResponsiveValue(12, 16, 20),
   },
   hallsContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: getResponsiveValue(16, 20, 32),
+  },
+  hallsContainerLarge: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   hallCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: colors.primary,
-    marginBottom: 16,
+    marginBottom: getResponsiveValue(16, 20, 24),
+    borderRadius: getResponsiveValue(12, 16, 20),
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    padding: getResponsiveValue(12, 16, 20),
   },
-  summaryRow: {
+  cardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: getResponsiveValue(12, 16, 20),
   },
-  summaryLabel: {
-    ...typography.body,
-    color: colors.textLight,
+  hallIcon: {
+    width: getResponsiveValue(40, 50, 60),
+    height: getResponsiveValue(40, 50, 60),
+    borderRadius: getResponsiveValue(20, 25, 30),
+    backgroundColor: colors.light,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: getResponsiveValue(10, 12, 16),
+  },
+  hallIconText: {
+    fontSize: getResponsiveValue(20, 24, 28),
+  },
+  hallInfo: {
     flex: 1,
   },
-  summaryValue: {
-    ...typography.body,
+  hallName: {
+    ...typography.h3,
     color: colors.text,
-    fontWeight: '600',
-    flex: 2,
-    textAlign: 'right',
+    marginBottom: 4,
   },
-  descriptionContainer: {
-    marginTop: 8,
-    paddingTop: 8,
+  hallLocation: {
+    ...typography.small,
+    color: colors.textLight,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  availableStatusBadge: {
+    backgroundColor: colors.success,
+  },
+  unavailableStatusBadge: {
+    backgroundColor: colors.danger,
+  },
+  statusText: {
+    ...typography.caption,
+    color: colors.white,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  availableStatusText: {
+    color: colors.white,
+  },
+  unavailableStatusText: {
+    color: colors.white,
+  },
+  capacitySection: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+  },
+  capacityItem: {
+    alignItems: 'center',
+  },
+  capacityIcon: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+  capacityText: {
+    ...typography.h3,
+    color: colors.primary,
+    fontWeight: 'bold',
+  },
+  capacityLabel: {
+    ...typography.caption,
+    color: colors.textLight,
+    textTransform: 'uppercase',
+  },
+  descriptionSection: {
+    marginBottom: 16,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  description: {
-    ...typography.body,
+  descriptionText: {
+    ...typography.small,
     color: colors.text,
-    marginTop: 4,
+    lineHeight: 20,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  tapToBook: {
+    ...typography.small,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  arrow: {
+    ...typography.body,
+    color: colors.primary,
+    fontWeight: 'bold',
+  },
+  unavailableText: {
+    color: colors.textLight,
+    opacity: 0.7,
   },
   errorContainer: {
     flex: 1,
@@ -192,8 +355,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   footer: {
-    padding: 20,
-    paddingTop: 10,
+    padding: getResponsiveValue(16, 20, 32),
+    paddingTop: getResponsiveValue(8, 10, 16),
   },
   submitButton: {
     backgroundColor: colors.success,

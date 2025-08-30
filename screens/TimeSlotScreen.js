@@ -6,6 +6,10 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Dimensions,
+  TouchableOpacity,
+  Platform,
+  Modal,
 } from 'react-native';
 import { globalStyles } from '../styles/globalStyles';
 import { colors } from '../styles/colors';
@@ -14,6 +18,20 @@ import { useBooking } from '../context/BookingContext';
 import CustomCheckbox from '../components/CustomCheckbox';
 import CustomButton from '../components/CustomButton';
 import bookingAPI from '../services/bookingApi';
+
+const { width, height } = Dimensions.get('window');
+
+// Responsive breakpoints
+const isTablet = width >= 768;
+const isLargeScreen = width >= 1024;
+const isSmallScreen = width < 400;
+
+// Responsive helper functions
+const getResponsiveValue = (small, medium, large) => {
+  if (isLargeScreen) return large;
+  if (isTablet) return medium;
+  return small;
+};
 
 const TimeSlotScreen = ({ navigation }) => {
   const { 
@@ -24,6 +42,8 @@ const TimeSlotScreen = ({ navigation }) => {
   
   const [timeSlots, setTimeSlots] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
     if (!selectedHall) {
@@ -33,19 +53,25 @@ const TimeSlotScreen = ({ navigation }) => {
       return;
     }
     loadTimeSlots();
-  }, [selectedHall]);
+  }, [selectedHall, selectedDate]);
 
   const loadTimeSlots = async () => {
     try {
       setLoading(true);
-      const response = await bookingAPI.getTimeSlots(selectedHall.id);
+      
+      // Format date for API call (YYYY-MM-DD)
+      const formattedDate = selectedDate.toISOString().split('T')[0];
+      
+      // API call with both hall ID and selected date
+      const response = await bookingAPI.getTimeSlots(selectedHall.id, formattedDate);
+      
       if (response.success) {
         setTimeSlots(response.data);
       } else {
-        Alert.alert('Error', 'Failed to load time slots');
+        Alert.alert('Error', response.message || 'Failed to load time slots for selected date');
       }
     } catch (error) {
-      Alert.alert('Error', 'Something went wrong');
+      Alert.alert('Error', 'Unable to load time slots. Please check your connection.');
       console.error('Error loading time slots:', error);
     } finally {
       setLoading(false);
@@ -80,6 +106,38 @@ const TimeSlotScreen = ({ navigation }) => {
     navigation.navigate('Requirements');
   };
 
+  const handleDateChange = (date) => {
+    setSelectedDate(date);
+    setShowDatePicker(false);
+    // Clear selected slots when date changes
+    selectedTimeSlots.forEach(slot => toggleTimeSlot(slot));
+  };
+
+  const formatDisplayDate = (date) => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  };
+
+  const isDateInPast = (date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date < today;
+  };
+
+  const getMinimumDate = () => {
+    return new Date(); // Today
+  };
+
+  const getMaximumDate = () => {
+    const maxDate = new Date();
+    maxDate.setDate(maxDate.getDate() + 30); // 3 months ahead
+    return maxDate;
+  };
+
   const isTimeSlotSelected = (timeSlot) => {
     return selectedTimeSlots.some(slot => slot.id === timeSlot.id);
   };
@@ -88,7 +146,9 @@ const TimeSlotScreen = ({ navigation }) => {
     return (
       <View style={[globalStyles.container, globalStyles.centered]}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading time slots...</Text>
+        <Text style={styles.loadingText}>
+          Loading time slots for {formatDisplayDate(selectedDate)}...
+        </Text>
       </View>
     );
   }
@@ -114,10 +174,33 @@ const TimeSlotScreen = ({ navigation }) => {
         contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.header}>
-          <Text style={styles.title}>Select Time Slots</Text>
+          <Text style={styles.title}>Select Date & Time Slots</Text>
           <Text style={styles.hallName}>{selectedHall.name}</Text>
           <Text style={styles.subtitle}>
-            Choose your preferred time slots for the seminar
+            Choose your preferred date and time slots for the seminar
+          </Text>
+        </View>
+
+        {/* Date Selector */}
+        <View style={[globalStyles.card, styles.dateCard]}>
+          <Text style={styles.cardTitle}>📅 Select Date</Text>
+          <TouchableOpacity 
+            style={styles.dateSelector} 
+            onPress={() => setShowDatePicker(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.dateText}>{formatDisplayDate(selectedDate)}</Text>
+            <Text style={styles.dateIcon}>📅</Text>
+          </TouchableOpacity>
+          
+          {isDateInPast(selectedDate) && (
+            <View style={styles.warningContainer}>
+              <Text style={styles.warningText}>⚠️ Selected date is in the past. Please choose a future date.</Text>
+            </View>
+          )}
+          
+          <Text style={styles.dateHint}>
+            You can book up to 3 months in advance
           </Text>
         </View>
 
@@ -125,13 +208,26 @@ const TimeSlotScreen = ({ navigation }) => {
           <Text style={styles.cardTitle}>Available Time Slots</Text>
           
           {timeSlots.map((timeSlot) => (
-            <CustomCheckbox
-              key={timeSlot.id}
-              label={`${timeSlot.time} (${timeSlot.duration})`}
-              checked={isTimeSlotSelected(timeSlot)}
-              onPress={() => handleTimeSlotToggle(timeSlot)}
-              style={styles.timeSlotCheckbox}
-            />
+            <View key={timeSlot.id} style={styles.timeSlotContainer}>
+              <CustomCheckbox
+                label={`${timeSlot.time} (${timeSlot.duration})`}
+                checked={isTimeSlotSelected(timeSlot)}
+                onPress={() => timeSlot.available ? handleTimeSlotToggle(timeSlot) : null}
+                style={[
+                  styles.timeSlotCheckbox,
+                  !timeSlot.available && styles.unavailableSlot
+                ]}
+                disabled={!timeSlot.available}
+              />
+              {!timeSlot.available && timeSlot.reason && (
+                <Text style={styles.unavailableReason}>
+                  ❌ {timeSlot.reason}
+                </Text>
+              )}
+              {timeSlot.available && (
+                <Text style={styles.availableIndicator}>✅ Available</Text>
+              )}
+            </View>
           ))}
         </View>
 
@@ -170,6 +266,58 @@ const TimeSlotScreen = ({ navigation }) => {
           />
         </View>
       </ScrollView>
+
+      {/* Custom Date Picker Modal */}
+      <Modal
+        visible={showDatePicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.datePickerModal}>
+            <Text style={styles.modalTitle}>Select Date</Text>
+            
+            <ScrollView style={styles.dateScrollView} showsVerticalScrollIndicator={false}>
+              {/* Generate next 90 days */}
+              {Array.from({ length: 30 }, (_, index) => {
+                const date = new Date();
+                date.setDate(date.getDate() + index);
+                const isToday = index === 0;
+                const isSelected = date.toDateString() === selectedDate.toDateString();
+                
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.dateOption,
+                      isSelected && styles.selectedDateOption,
+                      isToday && styles.todayDateOption
+                    ]}
+                    onPress={() => handleDateChange(date)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.dateOptionText,
+                      isSelected && styles.selectedDateText,
+                      isToday && styles.todayDateText
+                    ]}>
+                      {formatDisplayDate(date)} {isToday && '(Today)'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            
+            <TouchableOpacity 
+              style={styles.modalCloseButton} 
+              onPress={() => setShowDatePicker(false)}
+            >
+              <Text style={styles.modalCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -179,45 +327,116 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: getResponsiveValue(16, 20, 24),
   },
   header: {
-    padding: 20,
+    padding: getResponsiveValue(16, 20, 32),
     alignItems: 'center',
   },
   title: {
-    ...typography.h2,
+    fontSize: getResponsiveValue(20, 24, 28),
+    fontWeight: 'bold',
     color: colors.text,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: getResponsiveValue(6, 8, 10),
   },
   hallName: {
-    ...typography.h3,
+    fontSize: getResponsiveValue(18, 20, 24),
+    fontWeight: '600',
     color: colors.primary,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: getResponsiveValue(6, 8, 10),
   },
   subtitle: {
-    ...typography.body,
+    fontSize: getResponsiveValue(14, 16, 18),
     color: colors.textLight,
     textAlign: 'center',
   },
+  dateCard: {
+    marginHorizontal: getResponsiveValue(16, 20, 32),
+    marginBottom: getResponsiveValue(12, 16, 20),
+    padding: getResponsiveValue(16, 20, 24),
+  },
+  dateSelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.light,
+    padding: getResponsiveValue(12, 16, 20),
+    borderRadius: getResponsiveValue(8, 12, 16),
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: getResponsiveValue(8, 12, 16),
+  },
+  dateText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    fontWeight: '600',
+    flex: 1,
+  },
+  dateIcon: {
+    fontSize: getResponsiveValue(18, 20, 24),
+  },
+  dateHint: {
+    fontSize: getResponsiveValue(12, 14, 16),
+    color: colors.textLight,
+    textAlign: 'center',
+    marginTop: getResponsiveValue(4, 6, 8),
+  },
+  warningContainer: {
+    backgroundColor: '#FEF3C7',
+    padding: getResponsiveValue(8, 10, 12),
+    borderRadius: getResponsiveValue(6, 8, 10),
+    marginBottom: getResponsiveValue(8, 10, 12),
+  },
+  warningText: {
+    fontSize: getResponsiveValue(12, 14, 16),
+    color: '#B45309',
+    textAlign: 'center',
+  },
   timeSlotsCard: {
-    marginHorizontal: 20,
-    marginBottom: 16,
+    marginHorizontal: getResponsiveValue(16, 20, 32),
+    marginBottom: getResponsiveValue(12, 16, 20),
+    padding: getResponsiveValue(16, 20, 24),
   },
   summaryCard: {
-    marginHorizontal: 20,
-    marginBottom: 16,
+    marginHorizontal: getResponsiveValue(16, 20, 32),
+    marginBottom: getResponsiveValue(12, 16, 20),
     backgroundColor: colors.light,
+    padding: getResponsiveValue(16, 20, 24),
   },
   cardTitle: {
-    ...typography.h3,
+    fontSize: getResponsiveValue(18, 20, 22),
+    fontWeight: '600',
     color: colors.text,
-    marginBottom: 12,
+    marginBottom: getResponsiveValue(10, 12, 16),
+  },
+  timeSlotContainer: {
+    marginVertical: getResponsiveValue(4, 6, 8),
+    padding: getResponsiveValue(8, 10, 12),
+    borderRadius: getResponsiveValue(6, 8, 10),
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
   },
   timeSlotCheckbox: {
-    marginVertical: 4,
+    marginBottom: getResponsiveValue(4, 6, 8),
+  },
+  unavailableSlot: {
+    opacity: 0.5,
+    backgroundColor: colors.lightGray,
+  },
+  unavailableReason: {
+    fontSize: getResponsiveValue(12, 14, 16),
+    color: colors.danger,
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  availableIndicator: {
+    fontSize: getResponsiveValue(12, 14, 16),
+    color: colors.success,
+    fontWeight: '600',
+    marginTop: 4,
   },
   selectedSlot: {
     ...typography.body,
@@ -226,33 +445,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   infoCard: {
-    marginHorizontal: 20,
-    padding: 16,
+    marginHorizontal: getResponsiveValue(16, 20, 32),
+    padding: getResponsiveValue(12, 16, 20),
     backgroundColor: colors.primary + '10',
-    borderRadius: 12,
-    marginBottom: 16,
+    borderRadius: getResponsiveValue(8, 12, 16),
+    marginBottom: getResponsiveValue(12, 16, 20),
   },
   infoText: {
-    ...typography.body,
+    fontSize: getResponsiveValue(14, 16, 18),
     color: colors.text,
     textAlign: 'center',
-    marginVertical: 2,
+    marginVertical: getResponsiveValue(1, 2, 3),
   },
   footer: {
     backgroundColor: colors.white,
-    padding: 20,
-    paddingBottom: 30,
-    flexDirection: 'row',
+    padding: getResponsiveValue(16, 20, 32),
+    paddingBottom: getResponsiveValue(20, 30, 40),
+    flexDirection: isSmallScreen ? 'column' : 'row',
     ...globalStyles.shadow,
-    marginTop: 20,
+    marginTop: getResponsiveValue(16, 20, 24),
   },
   backButton: {
-    flex: 1,
-    marginRight: 10,
+    flex: isSmallScreen ? 0 : 1,
+    marginRight: isSmallScreen ? 0 : getResponsiveValue(8, 10, 12),
+    marginBottom: isSmallScreen ? 12 : 0,
   },
   continueButton: {
-    flex: 2,
-    marginLeft: 10,
+    flex: isSmallScreen ? 0 : 2,
+    marginLeft: isSmallScreen ? 0 : getResponsiveValue(8, 10, 12),
   },
   loadingText: {
     ...typography.body,
@@ -264,6 +484,77 @@ const styles = StyleSheet.create({
     color: colors.danger,
     textAlign: 'center',
     marginBottom: 20,
+  },
+
+  // Date Picker Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  datePickerModal: {
+    backgroundColor: colors.white,
+    borderRadius: getResponsiveValue(12, 16, 20),
+    padding: getResponsiveValue(16, 20, 24),
+    width: getResponsiveValue('90%', '80%', '70%'),
+    maxWidth: 500,
+    maxHeight: '80%',
+    ...globalStyles.shadow,
+  },
+  modalTitle: {
+    fontSize: getResponsiveValue(18, 20, 24),
+    fontWeight: 'bold',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: getResponsiveValue(16, 20, 24),
+  },
+  dateScrollView: {
+    maxHeight: getResponsiveValue(300, 400, 500),
+    marginBottom: getResponsiveValue(16, 20, 24),
+  },
+  dateOption: {
+    padding: getResponsiveValue(12, 16, 20),
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  selectedDateOption: {
+    backgroundColor: colors.primary,
+    borderRadius: getResponsiveValue(8, 10, 12),
+    marginVertical: 2,
+    borderBottomWidth: 0,
+  },
+  todayDateOption: {
+    backgroundColor: colors.secondary + '20',
+    borderRadius: getResponsiveValue(8, 10, 12),
+    marginVertical: 2,
+    borderBottomWidth: 0,
+    borderWidth: 1,
+    borderColor: colors.secondary,
+  },
+  dateOptionText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    textAlign: 'center',
+  },
+  selectedDateText: {
+    color: colors.white,
+    fontWeight: 'bold',
+  },
+  todayDateText: {
+    color: colors.secondary,
+    fontWeight: '600',
+  },
+  modalCloseButton: {
+    backgroundColor: colors.gray,
+    padding: getResponsiveValue(12, 16, 20),
+    borderRadius: getResponsiveValue(8, 10, 12),
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.white,
+    fontWeight: '600',
   },
 });
 

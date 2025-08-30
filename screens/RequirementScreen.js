@@ -9,12 +9,27 @@ import {
   ScrollView, 
   Alert,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Dimensions
 } from 'react-native';
 import { colors } from '../styles/colors';
 import { typography } from '../styles/typography';
 import { globalStyles } from '../styles/globalStyles';
 import { useBooking } from '../context/BookingContext';
+
+const { width, height } = Dimensions.get('window');
+
+// Responsive breakpoints
+const isTablet = width >= 768;
+const isLargeScreen = width >= 1024;
+const isSmallScreen = width < 400;
+
+// Responsive helper functions
+const getResponsiveValue = (small, medium, large) => {
+  if (isLargeScreen) return large;
+  if (isTablet) return medium;
+  return small;
+};
 
 export default function RequirementScreen({ navigation }) {
   const { selectedHall, selectedTimeSlots, updateForm, bookingForm } = useBooking();
@@ -136,82 +151,167 @@ export default function RequirementScreen({ navigation }) {
           </View>
 
           <View style={styles.form}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Full Name *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.name}
-                onChangeText={(value) => handleInputChange('name', value)}
-                placeholder="Enter your full name"
-                autoCapitalize="words"
-                placeholderTextColor={colors.lightGray}
-              />
-            </View>
+            {isLargeScreen ? (
+              // Two-column layout for large screens
+              <>
+                <View style={styles.formRow}>
+                  <View style={[styles.inputGroup, styles.inputGroupHalf]}>
+                    <Text style={styles.label}>Full Name *</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.name}
+                      onChangeText={(value) => handleInputChange('name', value)}
+                      placeholder="Enter your full name"
+                      autoCapitalize="words"
+                      placeholderTextColor={colors.lightGray}
+                    />
+                  </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email Address *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.email}
-                onChangeText={(value) => handleInputChange('email', value)}
-                placeholder="Enter your email"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                placeholderTextColor={colors.lightGray}
-              />
-            </View>
+                  <View style={[styles.inputGroup, styles.inputGroupHalf]}>
+                    <Text style={styles.label}>Email Address *</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.email}
+                      onChangeText={(value) => handleInputChange('email', value)}
+                      placeholder="Enter your email"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      placeholderTextColor={colors.lightGray}
+                    />
+                  </View>
+                </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Phone Number *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.phone}
-                onChangeText={(value) => handleInputChange('phone', value)}
-                placeholder="Enter your phone number"
-                keyboardType="phone-pad"
-                placeholderTextColor={colors.lightGray}
-              />
-            </View>
+                <View style={styles.formRow}>
+                  <View style={[styles.inputGroup, styles.inputGroupHalf]}>
+                    <Text style={styles.label}>Phone Number *</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.phone}
+                      onChangeText={(value) => handleInputChange('phone', value)}
+                      placeholder="Enter your phone number"
+                      keyboardType="phone-pad"
+                      placeholderTextColor={colors.lightGray}
+                    />
+                  </View>
 
-            
+                  <View style={[styles.inputGroup, styles.inputGroupHalf]}>
+                    <Text style={styles.label}>Event Title *</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.eventTitle}
+                      onChangeText={(value) => handleInputChange('eventTitle', value)}
+                      placeholder="Enter event title"
+                      autoCapitalize="words"
+                      placeholderTextColor={colors.lightGray}
+                    />
+                  </View>
+                </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Event Title *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.eventTitle}
-                onChangeText={(value) => handleInputChange('eventTitle', value)}
-                placeholder="Enter event title"
-                autoCapitalize="words"
-                placeholderTextColor={colors.lightGray}
-              />
-            </View>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Number of Attendees *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.attendees}
+                    onChangeText={(value) => handleInputChange('attendees', value)}
+                    placeholder={`Max ${selectedHall.capacity} people`}
+                    keyboardType="numeric"
+                    placeholderTextColor={colors.lightGray}
+                  />
+                </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Number of Attendees *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.attendees}
-                onChangeText={(value) => handleInputChange('attendees', value)}
-                placeholder={`Max ${selectedHall.capacity} people`}
-                keyboardType="numeric"
-                placeholderTextColor={colors.lightGray}
-              />
-            </View>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Event Requirements</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={formData.description}
+                    onChangeText={(value) => handleInputChange('description', value)}
+                    placeholder="Brief description of your event (optional)"
+                    multiline
+                    numberOfLines={4}
+                    textAlignVertical="top"
+                    placeholderTextColor={colors.lightGray}
+                  />
+                </View>
+              </>
+            ) : (
+              // Single column layout for smaller screens
+              <>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Full Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.name}
+                    onChangeText={(value) => handleInputChange('name', value)}
+                    placeholder="Enter your full name"
+                    autoCapitalize="words"
+                    placeholderTextColor={colors.lightGray}
+                  />
+                </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Event Requirements</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={formData.description}
-                onChangeText={(value) => handleInputChange('description', value)}
-                placeholder="Brief description of your event (optional)"
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-                placeholderTextColor={colors.lightGray}
-              />
-            </View>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Email Address *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.email}
+                    onChangeText={(value) => handleInputChange('email', value)}
+                    placeholder="Enter your email"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    placeholderTextColor={colors.lightGray}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Phone Number *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.phone}
+                    onChangeText={(value) => handleInputChange('phone', value)}
+                    placeholder="Enter your phone number"
+                    keyboardType="phone-pad"
+                    placeholderTextColor={colors.lightGray}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Event Title *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.eventTitle}
+                    onChangeText={(value) => handleInputChange('eventTitle', value)}
+                    placeholder="Enter event title"
+                    autoCapitalize="words"
+                    placeholderTextColor={colors.lightGray}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Number of Attendees *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.attendees}
+                    onChangeText={(value) => handleInputChange('attendees', value)}
+                    placeholder={`Max ${selectedHall.capacity} people`}
+                    keyboardType="numeric"
+                    placeholderTextColor={colors.lightGray}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Event Requirements</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={formData.description}
+                    onChangeText={(value) => handleInputChange('description', value)}
+                    placeholder="Brief description of your event (optional)"
+                    multiline
+                    numberOfLines={4}
+                    textAlignVertical="top"
+                    placeholderTextColor={colors.lightGray}
+                  />
+                </View>
+              </>
+            )}
           </View>
         </ScrollView>
 
@@ -234,13 +334,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    padding: 20,
-    paddingBottom: 10,
+    padding: getResponsiveValue(16, 20, 32),
+    paddingBottom: getResponsiveValue(8, 10, 16),
   },
   title: {
-    ...typography.h2,
+    fontSize: getResponsiveValue(20, 24, 28),
+    fontWeight: 'bold',
     color: colors.text,
-    marginBottom: 16,
+    marginBottom: getResponsiveValue(12, 16, 20),
     textAlign: 'center',
   },
   bookingSummary: {
@@ -266,45 +367,59 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   form: {
-    paddingHorizontal: 20,
+    paddingHorizontal: getResponsiveValue(16, 20, 32),
+    maxWidth: isLargeScreen ? 800 : '100%',
+    alignSelf: 'center',
+    width: '100%',
+  },
+  formRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: getResponsiveValue(16, 20, 24),
+  },
+  inputGroupHalf: {
+    flex: 1,
+    marginRight: 8,
   },
   label: {
-    ...typography.body,
+    fontSize: getResponsiveValue(14, 16, 18),
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 8,
+    marginBottom: getResponsiveValue(6, 8, 10),
   },
   input: {
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 8,
-    padding: 12,
-    ...typography.body,
+    borderRadius: getResponsiveValue(6, 8, 10),
+    padding: getResponsiveValue(10, 12, 16),
+    fontSize: getResponsiveValue(14, 16, 18),
     color: colors.text,
+    minHeight: getResponsiveValue(44, 48, 52),
   },
   textArea: {
-    height: 100,
-    paddingTop: 12,
+    height: getResponsiveValue(80, 100, 120),
+    paddingTop: getResponsiveValue(10, 12, 16),
+    textAlignVertical: 'top',
   },
   footer: {
-    padding: 20,
-    paddingTop: 10,
+    padding: getResponsiveValue(16, 20, 32),
+    paddingTop: getResponsiveValue(8, 10, 16),
   },
   submitButton: {
     backgroundColor: colors.success,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 8,
+    paddingVertical: getResponsiveValue(14, 16, 20),
+    paddingHorizontal: getResponsiveValue(20, 24, 32),
+    borderRadius: getResponsiveValue(8, 10, 12),
     alignItems: 'center',
     ...globalStyles.shadow,
+    minHeight: getResponsiveValue(48, 52, 60),
   },
   submitButtonText: {
     color: colors.white,
-    ...typography.body,
+    fontSize: getResponsiveValue(16, 18, 20),
     fontWeight: 'bold',
   },
   errorContainer: {
