@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://booking-seven-wheat.vercel.app';
 
 class BookingAPI {
   constructor() {
@@ -8,7 +8,7 @@ class BookingAPI {
   // Get all halls
   async getHalls() {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/halls`);
+      const response = await fetch(`${API_BASE_URL}/apiw/halls`);
       const data = await response.json();
       return data;
     } catch (error) {
