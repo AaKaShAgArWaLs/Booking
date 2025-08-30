@@ -5,6 +5,7 @@ const BookingContext = createContext();
 const initialState = {
   selectedHall: null,
   selectedTimeSlots: [],
+  selectedDate: null,
   bookingForm: {
     name: '',
     email: '',
@@ -23,6 +24,11 @@ const bookingReducer = (state, action) => {
       return {
         ...state,
         selectedHall: action.payload,
+      };
+    case 'SELECT_DATE':
+      return {
+        ...state,
+        selectedDate: action.payload,
       };
     case 'TOGGLE_TIME_SLOT':
       const timeSlot = action.payload;
@@ -57,6 +63,7 @@ const bookingReducer = (state, action) => {
         ...state,
         selectedHall: null,
         selectedTimeSlots: [],
+        selectedDate: null,
         bookingForm: initialState.bookingForm,
       };
     default:
@@ -69,6 +76,10 @@ export const BookingProvider = ({ children }) => {
 
   const selectHall = (hall) => {
     dispatch({ type: 'SELECT_HALL', payload: hall });
+  };
+
+  const selectDate = (date) => {
+    dispatch({ type: 'SELECT_DATE', payload: date });
   };
 
   const toggleTimeSlot = (timeSlot) => {
@@ -90,6 +101,7 @@ export const BookingProvider = ({ children }) => {
   const value = {
     ...state,
     selectHall,
+    selectDate,
     toggleTimeSlot,
     updateForm,
     addBooking,

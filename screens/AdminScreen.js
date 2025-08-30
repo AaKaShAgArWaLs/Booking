@@ -14,11 +14,15 @@ import {
   Dimensions,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from "react-native";
+import { Picker } from '@react-native-picker/picker';
+// Remove DateTimePicker import as it's causing issues on Android
 import { colors } from "../styles/colors";
 import { typography } from "../styles/typography";
 import { globalStyles } from "../styles/globalStyles";
 import bookingAPI from "../services/bookingApi";
+import { useNavigation } from '@react-navigation/native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -45,7 +49,17 @@ const getStatCardWidth = () => {
   return (width - 50) / 2;
 };
 
-const AdminScreen = () => {
+const AdminScreen = ({ navigation, route }) => {
+  // Get admin data from navigation params if available
+  const adminData = route?.params?.adminData;
+  
+  console.log('AdminScreen mounted with navigation:', !!navigation);
+  console.log('AdminScreen route params:', route?.params);
+  console.log('AdminScreen admin data:', adminData);
+  // Backup navigation hook in case navigation prop is not available
+  const hookNavigation = useNavigation();
+  const navigationToUse = navigation || hookNavigation;
+  
   const [bookings, setBookings] = useState([]);
   const [halls, setHalls] = useState([]);
   const [admins, setAdmins] = useState([]);
@@ -65,8 +79,14 @@ const AdminScreen = () => {
     time: '',
     department: '',
     purpose: '',
-    requester: ''
+    requester: '',
+    otherReason: ''
   });
+  const [availableTimeSlots, setAvailableTimeSlots] = useState([]);
+  const [loadingTimeSlots, setLoadingTimeSlots] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [tempSelectedDate, setTempSelectedDate] = useState(new Date());
   
   // Admin management states
   const [adminModalVisible, setAdminModalVisible] = useState(false);
@@ -74,7 +94,18 @@ const AdminScreen = () => {
   const [newAdminData, setNewAdminData] = useState({
     name: '',
     role: '',
-    email: ''
+    email: '',
+    password: ''
+  });
+
+  // Hall creation states
+  const [hallModalVisible, setHallModalVisible] = useState(false);
+  const [newHallData, setNewHallData] = useState({
+    name: '',
+    location: '',
+    capacity: '',
+    features: '',
+    icon: '🏛️'
   });
 
   useEffect(() => {
@@ -115,13 +146,18 @@ const AdminScreen = () => {
       }
 
       if (adminsResponse.success) {
-        setAdmins(adminsResponse.data.map(admin => ({
+        console.log('Loading admin data:', adminsResponse.data);
+        const adminData = adminsResponse.data.map(admin => ({
           id: admin.id,
           name: admin.name,
           role: admin.role,
           email: admin.email,
           active: admin.status === 'active'
-        })));
+        }));
+        console.log('Processed admin data:', adminData);
+        setAdmins(adminData);
+      } else {
+        console.error('Failed to load admin data:', adminsResponse);
       }
 
     } catch (error) {
@@ -143,6 +179,14 @@ const AdminScreen = () => {
     try {
       const response = await bookingAPI.approveBooking(booking.booking_id);
       if (response.success) {
+        // Log admin action
+        await logAdminAction('APPROVE_BOOKING', {
+          booking_id: booking.booking_id,
+          hall_name: booking.hall?.name || booking.name,
+          booking_date: booking.booking_date,
+          requester: booking.requester_name || booking.name
+        });
+
         setBookings((prev) =>
           prev.map((b) => (b.id === booking.id ? { ...b, status: "approved" } : b))
         );
@@ -174,6 +218,15 @@ const AdminScreen = () => {
     try {
       const response = await bookingAPI.rejectBooking(selectedBooking.booking_id, rejectReason);
       if (response.success) {
+        // Log admin action
+        await logAdminAction('REJECT_BOOKING', {
+          booking_id: selectedBooking.booking_id,
+          hall_name: selectedBooking.hall?.name || selectedBooking.name,
+          booking_date: selectedBooking.booking_date,
+          requester: selectedBooking.requester_name || selectedBooking.name,
+          reject_reason: rejectReason
+        });
+
         setBookings((prev) =>
           prev.map((b) =>
             b.id === selectedBooking.id
@@ -196,8 +249,16 @@ const AdminScreen = () => {
   // Toggle Hall Availability
   const toggleHallAvailability = async (hallId) => {
     try {
+      const hall = halls.find(h => h.id === hallId);
       const response = await bookingAPI.toggleHallStatus(hallId);
       if (response.success) {
+        // Log admin action
+        await logAdminAction('TOGGLE_HALL_STATUS', {
+          hall_id: hallId,
+          hall_name: hall?.name,
+          new_status: response.data.is_active ? 'available' : 'unavailable'
+        });
+
         setHalls((prev) =>
           prev.map((h) =>
             h.id === hallId ? { ...h, available: response.data.is_active } : h
@@ -234,9 +295,138 @@ const AdminScreen = () => {
       time: '',
       department: '',
       purpose: '',
-      requester: ''
+      requester: '',
+      otherReason: ''
     });
+    setAvailableTimeSlots([]);
+    const today = new Date();
+    setSelectedDate(today);
+    setTempSelectedDate(today);
+    setShowDatePicker(false);
     setPriorityModalVisible(true);
+  };
+
+  // Fetch time slots when hall and date are selected
+  const handleHallOrDateChange = async (field, value) => {
+    const updatedData = { ...priorityBookingData, [field]: value };
+    setPriorityBookingData(updatedData);
+
+    // Reset time slot when hall or date changes
+    if (field === 'hall' || field === 'date') {
+      updatedData.time = '';
+      setPriorityBookingData(updatedData);
+      setAvailableTimeSlots([]);
+    }
+
+    // Load time slots if both hall and date are selected
+    if (updatedData.hall && updatedData.date && (field === 'hall' || field === 'date')) {
+      setLoadingTimeSlots(true);
+      try {
+        const response = await bookingAPI.getTimeSlots(updatedData.hall, updatedData.date);
+        if (response.success && response.data) {
+          console.log('Time slots loaded:', response.data);
+          setAvailableTimeSlots(response.data);
+        } else {
+          console.log('No time slots available:', response);
+          setAvailableTimeSlots([]);
+          if (updatedData.hall && updatedData.date) {
+            Alert.alert('Info', 'No time slots available for selected hall and date');
+          }
+        }
+      } catch (error) {
+        console.error('Error loading time slots:', error);
+        setAvailableTimeSlots([]);
+        Alert.alert('Error', 'Failed to load time slots. Please try again.');
+      } finally {
+        setLoadingTimeSlots(false);
+      }
+    }
+  };
+
+  // Handle date selection
+  const handleDateSelection = (date) => {
+    setSelectedDate(date);
+    setTempSelectedDate(date);
+    const dateString = date.toISOString().split('T')[0];
+    handleHallOrDateChange('date', dateString);
+    setShowDatePicker(false);
+  };
+
+  // Generate date options for the next 30 days
+  const generateDateOptions = () => {
+    const dates = [];
+    for (let i = 0; i < 30; i++) {
+      const date = new Date();
+      date.setDate(date.getDate() + i);
+      dates.push(date);
+    }
+    return dates;
+  };
+
+  // Show date picker
+  const showDatePickerModal = () => {
+    setShowDatePicker(true);
+  };
+
+  // Log admin actions
+  const logAdminAction = async (action, details) => {
+    try {
+      const logData = {
+        action,
+        details,
+        timestamp: new Date().toISOString(),
+        admin_id: adminData?.id || 'current_admin_id' // Use logged in admin ID
+      };
+      
+      // You'll need to add this API method
+      await bookingAPI.logAdminAction(logData);
+    } catch (error) {
+      console.error('Error logging admin action:', error);
+    }
+  };
+
+  const handleLogout = async () => {
+    Alert.alert(
+      "Logout",
+      `Are you sure you want to logout${adminData?.name ? `, ${adminData.name}` : ''}?`,
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Logout",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Log the logout action
+              await logAdminAction('LOGOUT', {
+                admin_name: adminData?.name || 'Unknown',
+                admin_email: adminData?.email || 'Unknown'
+              });
+
+              // Call backend logout if we have admin data
+              if (adminData?.id) {
+                await bookingAPI.adminLogout(adminData.id);
+              }
+              
+              // Navigate back to home screen
+              navigationToUse.reset({
+                index: 0,
+                routes: [{ name: 'Home' }],
+              });
+            } catch (error) {
+              console.error('Logout error:', error);
+              // Even if logout API fails, still navigate away
+              navigationToUse.reset({
+                index: 0,
+                routes: [{ name: 'Home' }],
+              });
+            }
+          }
+        }
+      ]
+    );
   };
 
   const submitPriorityBooking = async () => {
@@ -245,13 +435,22 @@ const AdminScreen = () => {
       return;
     }
 
+    if (priorityBookingData.department === 'other' && !priorityBookingData.otherReason.trim()) {
+      Alert.alert("Error", "Please specify the reason for 'Other' department");
+      return;
+    }
+
     try {
+      const finalDepartment = priorityBookingData.department === 'other' 
+        ? priorityBookingData.otherReason 
+        : priorityBookingData.department;
+
       const bookingData = {
         hall_id: priorityBookingData.hall,
         time_slot_id: priorityBookingData.time,
         booking_date: priorityBookingData.date,
         requester_name: priorityBookingData.requester,
-        department: priorityBookingData.department,
+        department: finalDepartment,
         purpose: priorityBookingData.purpose,
         notes: `Priority booking created by admin`,
         attendees: 50 // Default value
@@ -260,6 +459,14 @@ const AdminScreen = () => {
       const response = await bookingAPI.createPriorityBooking(bookingData);
       
       if (response.success) {
+        // Log admin action
+        await logAdminAction('CREATE_PRIORITY_BOOKING', {
+          hall_id: priorityBookingData.hall,
+          booking_date: priorityBookingData.date,
+          department: finalDepartment,
+          requester: priorityBookingData.requester
+        });
+
         setPriorityModalVisible(false);
         Alert.alert("Success", response.message || "Priority booking created successfully!");
         await loadDashboardData(); // Refresh data
@@ -272,10 +479,60 @@ const AdminScreen = () => {
     }
   };
 
+  // Hall Management Functions
+  const handleAddHall = () => {
+    setNewHallData({
+      name: '',
+      location: '',
+      capacity: '',
+      features: '',
+      icon: '🏛️'
+    });
+    setHallModalVisible(true);
+  };
+
+  const submitHallData = async () => {
+    if (!newHallData.name || !newHallData.location || !newHallData.capacity) {
+      Alert.alert("Error", "Please fill all required fields (Name, Location, Capacity)");
+      return;
+    }
+
+    try {
+      const hallData = {
+        name: newHallData.name.trim(),
+        location: newHallData.location.trim(),
+        capacity: parseInt(newHallData.capacity),
+        features: newHallData.features.split(',').map(f => f.trim()).filter(f => f),
+        icon: newHallData.icon,
+        isAvailable: true
+      };
+
+      const response = await bookingAPI.createHall(hallData);
+      
+      if (response.success) {
+        // Log admin action
+        await logAdminAction('CREATE_HALL', {
+          hall_name: hallData.name,
+          location: hallData.location,
+          capacity: hallData.capacity
+        });
+
+        setHallModalVisible(false);
+        Alert.alert("Success", "Hall created successfully!");
+        await loadDashboardData(); // Refresh data
+      } else {
+        Alert.alert("Error", response.error || "Failed to create hall");
+      }
+    } catch (error) {
+      console.error('Error creating hall:', error);
+      Alert.alert("Error", "Failed to create hall");
+    }
+  };
+
   // Admin Management Functions
   const handleAddAdmin = () => {
     setSelectedAdmin(null);
-    setNewAdminData({ name: '', role: '', email: '' });
+    setNewAdminData({ name: '', role: '', email: '', password: '' });
     setAdminModalVisible(true);
   };
 
@@ -284,45 +541,124 @@ const AdminScreen = () => {
     setNewAdminData({
       name: admin.name,
       role: admin.role,
-      email: admin.email
+      email: admin.email,
+      password: '' // Don't pre-fill password for security
     });
     setAdminModalVisible(true);
   };
 
-  const submitAdminData = () => {
+  const submitAdminData = async () => {
     if (!newAdminData.name || !newAdminData.role || !newAdminData.email) {
-      Alert.alert("Error", "Please fill all fields");
+      Alert.alert("Error", "Please fill all required fields (Name, Role, Email)");
       return;
     }
 
-    if (selectedAdmin) {
-      // Edit existing admin
-      setAdmins(prev => prev.map(admin => 
-        admin.id === selectedAdmin.id 
-          ? { ...admin, ...newAdminData }
-          : admin
-      ));
-      Alert.alert("Success", "Admin updated successfully!");
-    } else {
-      // Add new admin
-      const newAdmin = {
-        id: Date.now().toString(),
-        ...newAdminData,
-        active: true
-      };
-      setAdmins(prev => [...prev, newAdmin]);
-      Alert.alert("Success", "Admin added successfully!");
+    if (!selectedAdmin && !newAdminData.password) {
+      Alert.alert("Error", "Password is required for new admin accounts");
+      return;
     }
 
-    setAdminModalVisible(false);
+    try {
+      if (selectedAdmin) {
+        // Edit existing admin
+        const adminData = {
+          name: newAdminData.name.trim(),
+          role: newAdminData.role.trim(),
+          email: newAdminData.email.trim(),
+          ...(newAdminData.password && { password: newAdminData.password })
+        };
+
+        const response = await bookingAPI.updateAdminUser(selectedAdmin.id, adminData);
+        
+        if (response.success) {
+          // Log admin action
+          await logAdminAction('UPDATE_ADMIN', {
+            admin_id: selectedAdmin.id,
+            admin_name: adminData.name,
+            admin_role: adminData.role
+          });
+
+          Alert.alert("Success", response.message || "Admin updated successfully!");
+          await loadDashboardData(); // Refresh data
+        } else {
+          Alert.alert("Error", response.error || "Failed to update admin");
+        }
+      } else {
+        // Add new admin
+        const adminData = {
+          name: newAdminData.name.trim(),
+          role: newAdminData.role.trim(),
+          email: newAdminData.email.trim(),
+          password: newAdminData.password,
+          permissions: ['bookings', 'halls'] // Default permissions
+        };
+
+        const response = await bookingAPI.createAdminUser(adminData);
+        
+        if (response.success) {
+          // Log admin action
+          await logAdminAction('CREATE_ADMIN', {
+            admin_name: adminData.name,
+            admin_role: adminData.role,
+            admin_email: adminData.email
+          });
+
+          Alert.alert("Success", response.message || "Admin added successfully!");
+          await loadDashboardData(); // Refresh data
+        } else {
+          Alert.alert("Error", response.error || "Failed to create admin");
+        }
+      }
+
+      setAdminModalVisible(false);
+    } catch (error) {
+      console.error('Error managing admin:', error);
+      Alert.alert("Error", "Failed to save admin data");
+    }
   };
 
-  const toggleAdminStatus = (id) => {
-    setAdmins(prev => prev.map(admin => 
-      admin.id === id 
-        ? { ...admin, active: !admin.active }
-        : admin
-    ));
+  const handleDeleteAdmin = async (admin) => {
+    console.log('Delete admin function called with:', admin);
+    
+    Alert.alert(
+      "Delete Admin User",
+      `Are you sure you want to permanently delete "${admin.name}"?\n\nThis action cannot be undone and will remove all access for this admin.`,
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              console.log('Attempting to delete admin with ID:', admin.id);
+              const response = await bookingAPI.deleteAdminUser(admin.id);
+              console.log('Delete response:', response);
+              
+              if (response.success) {
+                // Log the deletion action
+                await logAdminAction('DELETE_ADMIN', {
+                  deleted_admin_name: admin.name,
+                  deleted_admin_email: admin.email,
+                  deleted_admin_role: admin.role
+                });
+
+                Alert.alert("Success", response.message || "Admin deleted successfully!");
+                await loadDashboardData(); // Refresh the admin list
+              } else {
+                console.error('Delete failed:', response);
+                Alert.alert("Error", response.error || "Failed to delete admin user");
+              }
+            } catch (error) {
+              console.error('Error deleting admin:', error);
+              Alert.alert("Error", "Failed to delete admin user");
+            }
+          }
+        }
+      ]
+    );
   };
 
   // Calculate statistics from dashboard data or fallback to local calculations
@@ -359,9 +695,15 @@ const AdminScreen = () => {
       >
         {/* Professional Header */}
         <View style={styles.header}>
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Text style={styles.logoutIcon}>👤</Text>
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
           <View style={styles.headerContent}>
             <Text style={styles.title}>Admin Dashboard</Text>
-            <Text style={styles.subtitle}>Manage your booking system efficiently</Text>
+            <Text style={styles.subtitle}>
+              {adminData?.name ? `Welcome, ${adminData.name}` : 'Manage your booking system efficiently'}
+            </Text>
           </View>
         </View>
 
@@ -426,7 +768,28 @@ const AdminScreen = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Booking Requests</Text>
-            <TouchableOpacity style={styles.viewAllButton}>
+            <TouchableOpacity 
+              style={styles.viewAllButton}
+              onPress={() => {
+                try {
+                  console.log('View All button pressed');
+                  console.log('Prop navigation exists:', !!navigation);
+                  console.log('Hook navigation exists:', !!hookNavigation);
+                  console.log('Using navigation:', !!navigationToUse);
+                  
+                  if (navigationToUse && navigationToUse.navigate) {
+                    console.log('Navigating to ViewAllBookings...');
+                    navigationToUse.navigate('ViewAllBookings');
+                  } else {
+                    console.error('No navigation method available');
+                    Alert.alert('Error', 'Navigation not available. Please restart the app.');
+                  }
+                } catch (error) {
+                  console.error('Error navigating to ViewAllBookings:', error);
+                  Alert.alert('Error', 'Failed to navigate to bookings page: ' + error.message);
+                }
+              }}
+            >
               <Text style={styles.viewAllText}>View All</Text>
             </TouchableOpacity>
           </View>
@@ -446,7 +809,20 @@ const AdminScreen = () => {
               </TouchableOpacity>
             </View>
           ) : (
-            bookings.slice(0, 5).map((item) => (
+            // Sort bookings: pending first, then by booking date (newest first)
+            bookings
+              .sort((a, b) => {
+                // First priority: status (pending first)
+                if (a.status === 'pending' && b.status !== 'pending') return -1;
+                if (b.status === 'pending' && a.status !== 'pending') return 1;
+                
+                // Second priority: booking date (newest first)
+                const dateA = new Date(a.booking_date || a.submittedAt || 0);
+                const dateB = new Date(b.booking_date || b.submittedAt || 0);
+                return dateB - dateA;
+              })
+              .slice(0, 3)
+              .map((item) => (
             <View key={item.id} style={styles.bookingCard}>
               <View style={styles.bookingHeader}>
                 <View style={styles.hallInfo}>
@@ -513,7 +889,7 @@ const AdminScreen = () => {
             <Text style={styles.sectionTitle}>Hall Availability</Text>
             <TouchableOpacity 
               style={styles.addButton}
-              onPress={() => Alert.alert('Coming Soon', 'Hall creation feature will be available soon!')}
+              onPress={handleAddHall}
             >
               <Text style={styles.addButtonText}>+ Add Hall</Text>
             </TouchableOpacity>
@@ -528,7 +904,7 @@ const AdminScreen = () => {
               </Text>
               <TouchableOpacity 
                 style={styles.emptyStateButton}
-                onPress={() => Alert.alert('Coming Soon', 'Hall creation feature will be available soon!')}
+                onPress={handleAddHall}
               >
                 <Text style={styles.emptyStateButtonText}>Add Your First Hall</Text>
               </TouchableOpacity>
@@ -617,11 +993,11 @@ const AdminScreen = () => {
                       <Text style={styles.adminActionText}>✏️ Edit</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.adminActionBtn, admin.active ? styles.deactivateBtn : styles.activateBtn]}
-                      onPress={() => toggleAdminStatus(admin.id)}
+                      style={[styles.adminActionBtn, styles.deleteBtn]}
+                      onPress={() => handleDeleteAdmin(admin)}
                     >
                       <Text style={styles.adminActionText}>
-                        {admin.active ? '🚫 Deactivate' : '✅ Activate'}
+                        🗑️ Delete
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -708,49 +1084,138 @@ const AdminScreen = () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.priorityModalContainer}>
-            <Text style={styles.modalTitle}>🔥 Priority Booking</Text>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Hall Name *"
-              value={priorityBookingData.hall}
-              onChangeText={(text) => setPriorityBookingData({...priorityBookingData, hall: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Date (DD/MM/YYYY) *"
-              value={priorityBookingData.date}
-              onChangeText={(text) => setPriorityBookingData({...priorityBookingData, date: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Time Slot (HH:MM - HH:MM) *"
-              value={priorityBookingData.time}
-              onChangeText={(text) => setPriorityBookingData({...priorityBookingData, time: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Department (e.g., Placement Team, Head Office)"
-              value={priorityBookingData.department}
-              onChangeText={(text) => setPriorityBookingData({...priorityBookingData, department: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Purpose of booking"
-              value={priorityBookingData.purpose}
-              onChangeText={(text) => setPriorityBookingData({...priorityBookingData, purpose: text})}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Requester Name"
-              value={priorityBookingData.requester}
-              onChangeText={(text) => setPriorityBookingData({...priorityBookingData, requester: text})}
-            />
+            <ScrollView 
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.priorityModalContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={styles.modalTitle}>🔥 Priority Booking</Text>
+              
+              {/* Hall Dropdown */}
+              <View style={styles.dropdownContainer}>
+                <Text style={styles.dropdownLabel}>Hall Name *</Text>
+                <View style={styles.pickerWrapper}>
+                  <Picker
+                    selectedValue={priorityBookingData.hall}
+                    onValueChange={(value) => handleHallOrDateChange('hall', value)}
+                    style={styles.picker}
+                  >
+                    <Picker.Item label="Select Hall" value="" />
+                    {halls.map((hall) => (
+                      <Picker.Item key={hall.id} label={hall.name} value={hall.id} />
+                    ))}
+                  </Picker>
+                </View>
+              </View>
+              
+              {/* Date Picker */}
+              <View style={styles.dropdownContainer}>
+                <Text style={styles.dropdownLabel}>Date *</Text>
+                <TouchableOpacity 
+                  style={styles.datePickerButton} 
+                  onPress={showDatePickerModal}
+                >
+                  <Text style={styles.datePickerText}>
+                    {priorityBookingData.date 
+                      ? selectedDate.toLocaleDateString('en-GB', {
+                          day: '2-digit',
+                          month: '2-digit', 
+                          year: 'numeric'
+                        })
+                      : 'Select Date'
+                    }
+                  </Text>
+                  <Text style={styles.datePickerIcon}>📅</Text>
+                </TouchableOpacity>
+              </View>
+
+              
+              {/* Time Slot Dropdown */}
+              <View style={styles.dropdownContainer}>
+                <Text style={styles.dropdownLabel}>Time Slot *</Text>
+                <View style={[styles.pickerWrapper, loadingTimeSlots && styles.pickerLoading]}>
+                  {loadingTimeSlots ? (
+                    <View style={styles.loadingTimeSlots}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                      <Text style={styles.loadingText}>Loading time slots...</Text>
+                    </View>
+                  ) : (
+                    <Picker
+                      selectedValue={priorityBookingData.time}
+                      onValueChange={(value) => {
+                        console.log('Selected time slot:', value);
+                        setPriorityBookingData({...priorityBookingData, time: value});
+                      }}
+                      style={styles.picker}
+                      enabled={availableTimeSlots.length > 0}
+                    >
+                      {availableTimeSlots.length === 0 ? (
+                        <Picker.Item 
+                          label={priorityBookingData.hall && priorityBookingData.date ? "No slots available" : "Select hall and date first"} 
+                          value="" 
+                        />
+                      ) : (
+                        <>
+                          <Picker.Item label="Select Time Slot" value="" />
+                          {availableTimeSlots.map((slot) => (
+                            <Picker.Item 
+                              key={slot.id || slot.slot_id} 
+                              label={`${slot.start_time} - ${slot.end_time}`} 
+                              value={slot.id || slot.slot_id} 
+                            />
+                          ))}
+                        </>
+                      )}
+                    </Picker>
+                  )}
+                </View>
+              </View>
+              
+              {/* Department Dropdown */}
+              <View style={styles.dropdownContainer}>
+                <Text style={styles.dropdownLabel}>Department</Text>
+                <View style={styles.pickerWrapper}>
+                  <Picker
+                    selectedValue={priorityBookingData.department}
+                    onValueChange={(value) => setPriorityBookingData({...priorityBookingData, department: value, otherReason: ''})}
+                    style={styles.picker}
+                  >
+                    <Picker.Item label="Select Department" value="" />
+                    <Picker.Item label="Placement" value="placement" />
+                    <Picker.Item label="Head Office" value="head_office" />
+                    <Picker.Item label="Other" value="other" />
+                  </Picker>
+                </View>
+              </View>
+
+              {/* Other Reason Input - Show when 'other' is selected */}
+              {priorityBookingData.department === 'other' && (
+                <TextInput
+                  style={styles.input}
+                  placeholder="Specify reason for Other department *"
+                  value={priorityBookingData.otherReason}
+                  onChangeText={(text) => setPriorityBookingData({...priorityBookingData, otherReason: text})}
+                />
+              )}
+              
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Purpose of booking"
+                value={priorityBookingData.purpose}
+                onChangeText={(text) => setPriorityBookingData({...priorityBookingData, purpose: text})}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Requester Name"
+                value={priorityBookingData.requester}
+                onChangeText={(text) => setPriorityBookingData({...priorityBookingData, requester: text})}
+              />
+              
+            </ScrollView>
             
             <View style={styles.modalActions}>
               <TouchableOpacity
@@ -766,6 +1231,74 @@ const AdminScreen = () => {
                 <Text style={styles.btnText}>Cancel</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Date Picker Modal */}
+      <Modal
+        visible={showDatePicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.datePickerModalContainer}>
+            <View style={styles.datePickerHeader}>
+              <TouchableOpacity 
+                onPress={() => {
+                  setTempSelectedDate(selectedDate); // Reset temp date
+                  setShowDatePicker(false);
+                }}
+                style={styles.datePickerCancelBtn}
+              >
+                <Text style={[styles.datePickerBtnText, {color: colors.primary}]}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.datePickerTitle}>Select Date</Text>
+              <TouchableOpacity 
+                onPress={() => handleDateSelection(tempSelectedDate)}
+                style={styles.datePickerDoneBtn}
+              >
+                <Text style={styles.datePickerBtnText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.datePickerContent} showsVerticalScrollIndicator={false}>
+              {generateDateOptions().map((date, index) => {
+                const dateString = date.toISOString().split('T')[0];
+                const isSelected = tempSelectedDate.toISOString().split('T')[0] === dateString;
+                const displayDate = date.toLocaleDateString('en-GB', {
+                  weekday: 'short',
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric'
+                });
+                
+                return (
+                  <TouchableOpacity
+                    key={dateString}
+                    style={[
+                      styles.dateOption,
+                      isSelected && styles.dateOptionSelected
+                    ]}
+                    onPress={() => setTempSelectedDate(date)}
+                  >
+                    <Text style={[
+                      styles.dateOptionText,
+                      isSelected && styles.dateOptionTextSelected
+                    ]}>
+                      {displayDate}
+                    </Text>
+                    {index === 0 && (
+                      <Text style={styles.dateOptionLabel}>Today</Text>
+                    )}
+                    {index === 1 && (
+                      <Text style={styles.dateOptionLabel}>Tomorrow</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -805,6 +1338,15 @@ const AdminScreen = () => {
               keyboardType="email-address"
             />
             
+            <TextInput
+              style={styles.input}
+              placeholder={selectedAdmin ? "New Password (leave empty to keep current)" : "Password *"}
+              value={newAdminData.password}
+              onChangeText={(text) => setNewAdminData({...newAdminData, password: text})}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+            
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[styles.button, styles.approve]}
@@ -817,6 +1359,85 @@ const AdminScreen = () => {
               <TouchableOpacity
                 style={[styles.button, styles.reject]}
                 onPress={() => setAdminModalVisible(false)}
+              >
+                <Text style={styles.btnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Hall Creation Modal */}
+      <Modal
+        visible={hallModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setHallModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>🏛️ Add New Hall</Text>
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Hall Name *"
+              value={newHallData.name}
+              onChangeText={(text) => setNewHallData({...newHallData, name: text})}
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Location *"
+              value={newHallData.location}
+              onChangeText={(text) => setNewHallData({...newHallData, location: text})}
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Capacity (number of people) *"
+              value={newHallData.capacity}
+              onChangeText={(text) => setNewHallData({...newHallData, capacity: text})}
+              keyboardType="numeric"
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Features (comma-separated, e.g., AC, Projector, WiFi)"
+              value={newHallData.features}
+              onChangeText={(text) => setNewHallData({...newHallData, features: text})}
+              multiline
+            />
+            
+            <View style={styles.dropdownContainer}>
+              <Text style={styles.dropdownLabel}>Hall Icon</Text>
+              <View style={styles.pickerWrapper}>
+                <Picker
+                  selectedValue={newHallData.icon}
+                  onValueChange={(value) => setNewHallData({...newHallData, icon: value})}
+                  style={styles.picker}
+                >
+                  <Picker.Item label="🏛️ Classic Hall" value="🏛️" />
+                  <Picker.Item label="🎭 Auditorium" value="🎭" />
+                  <Picker.Item label="🏢 Conference Room" value="🏢" />
+                  <Picker.Item label="🎪 Event Hall" value="🎪" />
+                  <Picker.Item label="📚 Library Hall" value="📚" />
+                  <Picker.Item label="🎨 Art Gallery" value="🎨" />
+                  <Picker.Item label="🏟️ Sports Hall" value="🏟️" />
+                  <Picker.Item label="🎵 Music Hall" value="🎵" />
+                </Picker>
+              </View>
+            </View>
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.button, styles.approve]}
+                onPress={submitHallData}
+              >
+                <Text style={styles.btnText}>🏛️ Create Hall</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.button, styles.reject]}
+                onPress={() => setHallModalVisible(false)}
               >
                 <Text style={styles.btnText}>Cancel</Text>
               </TouchableOpacity>
@@ -841,6 +1462,30 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     paddingHorizontal: 20,
     marginBottom: 20,
+    position: 'relative',
+  },
+  logoutButton: {
+    position: 'absolute',
+    top: 25,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  logoutIcon: {
+    fontSize: 16,
+    marginRight: 6,
+    color: colors.white,
+  },
+  logoutText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
   },
   headerContent: {
     alignItems: 'center',
@@ -1271,6 +1916,9 @@ const styles = StyleSheet.create({
   deactivateBtn: {
     backgroundColor: colors.danger,
   },
+  deleteBtn: {
+    backgroundColor: '#dc3545', // Strong red for delete action
+  },
   adminActionText: {
     ...typography.small,
     color: colors.white,
@@ -1284,6 +1932,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  scrollModalContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
   modalContainer: {
     backgroundColor: colors.white,
     padding: getResponsiveValue(20, 24, 32),
@@ -1294,12 +1948,155 @@ const styles = StyleSheet.create({
   },
   priorityModalContainer: {
     backgroundColor: colors.white,
-    padding: getResponsiveValue(20, 24, 32),
     borderRadius: getResponsiveValue(16, 20, 24),
-    width: getResponsiveValue('95%', '90%', '80%'),
-    maxWidth: getResponsiveValue(400, 450, 600),
-    maxHeight: '85%',
+    width: getResponsiveValue('95%', '85%', '75%'),
+    maxWidth: getResponsiveValue(450, 500, 600),
+    maxHeight: getResponsiveValue('90%', '85%', '80%'),
     ...globalStyles.shadow,
+    flex: 0,
+  },
+  
+  priorityModalContent: {
+    padding: getResponsiveValue(20, 24, 32),
+    paddingBottom: getResponsiveValue(10, 15, 20),
+  },
+  
+  // Dropdown Styles
+  dropdownContainer: {
+    marginBottom: getResponsiveValue(16, 20, 24),
+  },
+  dropdownLabel: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  pickerWrapper: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: getResponsiveValue(8, 12, 16),
+    backgroundColor: colors.background,
+    minHeight: getResponsiveValue(44, 48, 52),
+    justifyContent: 'center',
+  },
+  picker: {
+    height: getResponsiveValue(44, 48, 52),
+    color: colors.text,
+  },
+  pickerLoading: {
+    opacity: 0.6,
+  },
+  loadingTimeSlots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: getResponsiveValue(12, 16, 20),
+  },
+  
+  // Date Picker Styles
+  datePickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: getResponsiveValue(8, 12, 16),
+    backgroundColor: colors.background,
+    paddingHorizontal: getResponsiveValue(12, 16, 20),
+    paddingVertical: getResponsiveValue(12, 16, 20),
+    minHeight: getResponsiveValue(44, 48, 52),
+  },
+  datePickerText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    flex: 1,
+  },
+  datePickerIcon: {
+    fontSize: getResponsiveValue(16, 18, 20),
+    marginLeft: 10,
+  },
+  
+  // Text Area Style
+  textArea: {
+    minHeight: getResponsiveValue(80, 90, 100),
+    paddingTop: getResponsiveValue(12, 16, 20),
+  },
+  
+  // Custom Date Picker Modal Styles
+  datePickerModalContainer: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    maxHeight: '60%',
+    paddingBottom: 34, // Safe area for iOS
+  },
+  datePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  datePickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  datePickerCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  datePickerDoneBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+  },
+  datePickerBtnText: {
+    fontSize: 16,
+    color: colors.white,
+    fontWeight: '600',
+  },
+  datePickerContent: {
+    maxHeight: 300,
+  },
+  dateOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.lightGray,
+  },
+  dateOptionSelected: {
+    backgroundColor: colors.light,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+  },
+  dateOptionText: {
+    fontSize: 16,
+    color: colors.text,
+    flex: 1,
+  },
+  dateOptionTextSelected: {
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  dateOptionLabel: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '600',
+    backgroundColor: colors.light,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   modalTitle: {
     fontSize: getResponsiveValue(18, 20, 24),
@@ -1322,6 +2119,13 @@ const styles = StyleSheet.create({
   modalActions: {
     flexDirection: isSmallScreen ? 'column' : 'row',
     justifyContent: 'space-between',
+    paddingHorizontal: getResponsiveValue(20, 24, 32),
+    paddingVertical: getResponsiveValue(16, 20, 24),
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.white,
+    borderBottomLeftRadius: getResponsiveValue(16, 20, 24),
+    borderBottomRightRadius: getResponsiveValue(16, 20, 24),
   },
   button: {
     flex: isSmallScreen ? 0 : 1,
@@ -1357,9 +2161,9 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   loadingText: {
-    fontSize: getResponsiveValue(14, 16, 18),
+    fontSize: getResponsiveValue(12, 14, 16),
     color: colors.textLight,
-    marginTop: 12,
+    marginLeft: 8,
     textAlign: 'center',
   },
   

@@ -7,7 +7,9 @@ import HomeScreen from './screens/HomeScreen';
 import TimeSlotScreen from './screens/TimeSlotScreen';
 import RequirementScreen from './screens/RequirementScreen';
 import ConfirmationScreen from './screens/ConfirmationScreen';
+import AdminLoginScreen from './screens/AdminLoginScreen';
 import AdminScreen from './screens/AdminScreen';
+import ViewAllBookingsScreen from './screens/ViewAllBookingsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -20,7 +22,21 @@ const App = () => {
           <Stack.Screen name="TimeSlot" component={TimeSlotScreen} />
           <Stack.Screen name="Requirements" component={RequirementScreen} />
           <Stack.Screen name="Confirmation" component={ConfirmationScreen} />
-          <Stack.Screen name="Admin" component={AdminScreen} />
+          <Stack.Screen 
+            name="AdminLogin" 
+            component={AdminLoginScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen 
+            name="Admin" 
+            component={AdminScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen 
+            name="ViewAllBookings" 
+            component={ViewAllBookingsScreen}
+            options={{ headerShown: false }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
     </BookingProvider>

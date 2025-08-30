@@ -17,6 +17,8 @@ halls_collection = db['halls']
 time_slots_collection = db['time_slots']
 bookings_collection = db['bookings']
 maintenance_collection = db['maintenance']
+admin_users_collection = db['admin_users']
+admin_logs_collection = db['admin_logs']
 
 CORS(app)
 
@@ -146,72 +148,94 @@ def get_time_slots(hall_id):
         }), 500
 
 @app.route('/api/bookings', methods=['POST'])
-def submit_booking():
+def create_booking():
     try:
-        data = request.get_json()
-        
+        print("=== BACKEND DEBUG ===")
+        print(f"Received data: {request.json}")
+        print(f"Content-Type: {request.headers.get('Content-Type')}")
+
+        data = request.json
+
+        # Validate required fields
+        required_fields = ['hall_id', 'time_slot_id', 'requester_name', 'email']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"success": False, "error": f"Missing required field: {field}"}), 400
+
         # Generate booking ID
         booking_id = f"BK{int(datetime.now().timestamp())}"
         
-        # Get hall and time slot details
-        hall = halls_collection.find_one({'_id': ObjectId(data['hall']['id'])})
-        time_slot = time_slots_collection.find_one({'_id': ObjectId(data['timeSlots'][0]['id'])})
+        # Verify hall and time slot exist
+        hall = halls_collection.find_one({'_id': ObjectId(data['hall_id'])})
+        time_slot = time_slots_collection.find_one({'_id': ObjectId(data['time_slot_id'])})
         
-        if not hall or not time_slot:
+        if not hall:
+            return jsonify({"success": False, "error": "Hall not found"}), 404
+        if not time_slot:
+            return jsonify({"success": False, "error": "Time slot not found"}), 404
+
+        # Check if slot is already booked
+        existing_booking = bookings_collection.find_one({
+            'hall_id': data['hall_id'],
+            'time_slot_id': data['time_slot_id'], 
+            'booking_date': data['booking_date'],
+            'status': {'$in': ['pending', 'approved']}
+        })
+        
+        if existing_booking:
             return jsonify({
-                'success': False,
-                'error': 'Invalid hall or time slot'
-            }), 400
-        
-        # Create new booking document
+                "success": False, 
+                "error": "Time slot is already booked for this date"
+            }), 409
+
+        # Create booking document
         booking_doc = {
             'booking_id': booking_id,
-            'hall_id': data['hall']['id'],
-            'time_slot_id': data['timeSlots'][0]['id'],
-            'booking_date': data['timeSlots'][0]['date'],
-            'name': data['name'],
+            'hall_id': data['hall_id'],
+            'time_slot_id': data['time_slot_id'],
+            'booking_date': data['booking_date'],
+            'name': data['requester_name'],
             'email': data['email'],
-            'phone': data['phone'],
+            'phone': data.get('phone', ''),
             'organization': data.get('organization', ''),
-            'event_title': data['eventTitle'],
-            'description': data.get('description', ''),
+            'event_title': data['event_title'],
+            'description': data.get('purpose', ''),
             'attendees': int(data['attendees']),
             'status': 'pending',
             'submitted_at': datetime.utcnow(),
             'approved_at': None,
             'approved_by': None,
-            'rejection_reason': None
+            'rejection_reason': None,
+            'priority_booking': False,
+            'notes': data.get('notes', '')
         }
-        
+
+        # Insert booking into database
         result = bookings_collection.insert_one(booking_doc)
         
+        print(f"Booking created successfully: {booking_id}")
+        
+        # Return success response
         return jsonify({
             'success': True,
             'data': {
                 'id': str(result.inserted_id),
                 'booking_id': booking_id,
-                'hall': data['hall'],
-                'timeSlot': data['timeSlots'][0]['time'],
-                'name': data['name'],
-                'email': data['email'],
-                'phone': data['phone'],
-                'organization': data.get('organization', ''),
-                'eventTitle': data['eventTitle'],
-                'description': data.get('description', ''),
-                'attendees': data['attendees'],
                 'status': 'pending',
-                'submittedAt': booking_doc['submitted_at'].isoformat()
+                'hall_name': hall['name'],
+                'time_slot': time_slot['time'],
+                'booking_date': data['booking_date']
             },
-            'message': 'Booking submitted successfully! You will receive a confirmation email.'
-        })
-    
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': 'Failed to submit booking. Please try again.',
-            'message': str(e)
-        }), 500
+            'message': 'Booking request submitted successfully!'
+        }), 201
 
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+    
+    
 @app.route('/api/bookings', methods=['GET'])
 def get_all_bookings():
     try:
@@ -503,43 +527,6 @@ def create_priority_booking():
             'message': str(e)
         }), 500
 
-@app.route('/api/admin/users', methods=['GET'])
-def get_admin_users():
-    try:
-        # For now, return mock admin users
-        # In a real app, you would have a separate users collection
-        users = [
-            {
-                'id': '1',
-                'name': 'Admin User',
-                'email': 'admin@booking.com',
-                'role': 'Super Admin',
-                'status': 'active',
-                'lastLogin': datetime.utcnow().isoformat(),
-                'permissions': ['all']
-            },
-            {
-                'id': '2',
-                'name': 'Hall Manager',
-                'email': 'manager@booking.com',
-                'role': 'Hall Manager',
-                'status': 'active',
-                'lastLogin': (datetime.utcnow() - timedelta(hours=2)).isoformat(),
-                'permissions': ['bookings', 'halls']
-            }
-        ]
-        
-        return jsonify({
-            'success': True,
-            'data': users
-        })
-    
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': 'Failed to fetch admin users',
-            'message': str(e)
-        }), 500
 
 @app.route('/api/admin/halls', methods=['POST'])
 def create_hall():
@@ -725,6 +712,430 @@ def get_maintenance_schedules():
             'message': str(e)
         }), 500
 
+# Admin Authentication Routes
+
+@app.route('/api/admin/auth/login', methods=['POST'])
+def admin_login():
+    try:
+        data = request.get_json()
+        email = data.get('email', '').lower().strip()
+        password = data.get('password', '')
+        
+        if not email or not password:
+            return jsonify({
+                'success': False,
+                'error': 'Email and password are required'
+            }), 400
+        
+        # Find admin user
+        admin = admin_users_collection.find_one({
+            'email': email,
+            'is_active': True
+        })
+        
+        if not admin:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid email or password'
+            }), 401
+        
+        # Check password (in production, use proper password hashing)
+        if admin['password'] != password:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid email or password'
+            }), 401
+        
+        # Update last login
+        admin_users_collection.update_one(
+            {'_id': admin['_id']},
+            {'$set': {'last_login': datetime.utcnow()}}
+        )
+        
+        # Log admin login
+        admin_logs_collection.insert_one({
+            'admin_id': str(admin['_id']),
+            'action': 'LOGIN',
+            'details': {
+                'admin_name': admin['name'],
+                'admin_email': admin['email'],
+                'login_time': datetime.utcnow().isoformat()
+            },
+            'timestamp': datetime.utcnow(),
+            'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+        })
+        
+        # Return admin data (excluding password)
+        return jsonify({
+            'success': True,
+            'data': {
+                'id': str(admin['_id']),
+                'name': admin['name'],
+                'email': admin['email'],
+                'role': admin['role'],
+                'permissions': admin.get('permissions', []),
+                'last_login': admin.get('last_login').isoformat() if admin.get('last_login') else None,
+                'created_at': admin.get('created_at', datetime.utcnow()).isoformat()
+            },
+            'message': f'Welcome back, {admin["name"]}!'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Login failed',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/auth/logout', methods=['POST'])
+def admin_logout():
+    try:
+        data = request.get_json()
+        admin_id = data.get('admin_id')
+        
+        if admin_id:
+            # Log admin logout
+            admin = admin_users_collection.find_one({'_id': ObjectId(admin_id)})
+            if admin:
+                admin_logs_collection.insert_one({
+                    'admin_id': admin_id,
+                    'action': 'LOGOUT',
+                    'details': {
+                        'admin_name': admin['name'],
+                        'logout_time': datetime.utcnow().isoformat()
+                    },
+                    'timestamp': datetime.utcnow(),
+                    'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+                })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Logged out successfully'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Logout failed',
+            'message': str(e)
+        }), 500
+
+# Admin Management Routes
+
+@app.route('/api/admin/users', methods=['GET'])
+def get_admin_users():
+    try:
+        admins = list(admin_users_collection.find({'is_active': True}))
+        
+        formatted_admins = []
+        for admin in admins:
+            formatted_admins.append({
+                'id': str(admin['_id']),
+                'name': admin['name'],
+                'email': admin['email'],
+                'role': admin['role'],
+                'status': 'active' if admin['is_active'] else 'inactive',
+                'last_login': admin.get('last_login').isoformat() if admin.get('last_login') else None,
+                'created_at': admin.get('created_at', datetime.utcnow()).isoformat(),
+                'permissions': admin.get('permissions', [])
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': formatted_admins
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch admin users',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/users', methods=['POST'])
+def create_admin_user():
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['name', 'email', 'password', 'role']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({
+                    'success': False,
+                    'error': f'Missing required field: {field}'
+                }), 400
+        
+        email = data['email'].lower().strip()
+        
+        # Check if admin already exists
+        existing_admin = admin_users_collection.find_one({'email': email})
+        if existing_admin:
+            return jsonify({
+                'success': False,
+                'error': 'Admin with this email already exists'
+            }), 409
+        
+        # Create admin document
+        admin_doc = {
+            'name': data['name'].strip(),
+            'email': email,
+            'password': data['password'],  # In production, hash this password
+            'role': data['role'].strip(),
+            'permissions': data.get('permissions', ['bookings', 'halls']),
+            'is_active': True,
+            'created_at': datetime.utcnow(),
+            'last_login': None
+        }
+        
+        result = admin_users_collection.insert_one(admin_doc)
+        
+        # Log admin creation
+        admin_logs_collection.insert_one({
+            'admin_id': 'system',
+            'action': 'CREATE_ADMIN',
+            'details': {
+                'new_admin_name': admin_doc['name'],
+                'new_admin_email': admin_doc['email'],
+                'new_admin_role': admin_doc['role']
+            },
+            'timestamp': datetime.utcnow(),
+            'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+        })
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'id': str(result.inserted_id),
+                'name': admin_doc['name'],
+                'email': admin_doc['email'],
+                'role': admin_doc['role']
+            },
+            'message': 'Admin user created successfully!'
+        }), 201
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to create admin user',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/users/<admin_id>', methods=['PUT'])
+def update_admin_user(admin_id):
+    try:
+        data = request.get_json()
+        
+        # Find existing admin
+        admin = admin_users_collection.find_one({'_id': ObjectId(admin_id)})
+        if not admin:
+            return jsonify({
+                'success': False,
+                'error': 'Admin user not found'
+            }), 404
+        
+        # Prepare update document
+        update_doc = {}
+        if 'name' in data:
+            update_doc['name'] = data['name'].strip()
+        if 'email' in data:
+            email = data['email'].lower().strip()
+            # Check if email is already taken by another admin
+            existing_admin = admin_users_collection.find_one({
+                'email': email,
+                '_id': {'$ne': ObjectId(admin_id)}
+            })
+            if existing_admin:
+                return jsonify({
+                    'success': False,
+                    'error': 'Email is already taken by another admin'
+                }), 409
+            update_doc['email'] = email
+        if 'password' in data and data['password']:
+            update_doc['password'] = data['password']  # In production, hash this
+        if 'role' in data:
+            update_doc['role'] = data['role'].strip()
+        if 'permissions' in data:
+            update_doc['permissions'] = data['permissions']
+        
+        update_doc['updated_at'] = datetime.utcnow()
+        
+        # Update admin
+        admin_users_collection.update_one(
+            {'_id': ObjectId(admin_id)},
+            {'$set': update_doc}
+        )
+        
+        # Log admin update
+        admin_logs_collection.insert_one({
+            'admin_id': admin_id,
+            'action': 'UPDATE_ADMIN',
+            'details': {
+                'admin_name': admin['name'],
+                'updated_fields': list(update_doc.keys())
+            },
+            'timestamp': datetime.utcnow(),
+            'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Admin user updated successfully!'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to update admin user',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/users/<admin_id>/toggle', methods=['PUT'])
+def toggle_admin_status(admin_id):
+    try:
+        admin = admin_users_collection.find_one({'_id': ObjectId(admin_id)})
+        if not admin:
+            return jsonify({
+                'success': False,
+                'error': 'Admin user not found'
+            }), 404
+        
+        new_status = not admin.get('is_active', True)
+        
+        admin_users_collection.update_one(
+            {'_id': ObjectId(admin_id)},
+            {'$set': {'is_active': new_status, 'updated_at': datetime.utcnow()}}
+        )
+        
+        # Log status change
+        admin_logs_collection.insert_one({
+            'admin_id': admin_id,
+            'action': 'TOGGLE_ADMIN_STATUS',
+            'details': {
+                'admin_name': admin['name'],
+                'new_status': 'active' if new_status else 'inactive'
+            },
+            'timestamp': datetime.utcnow(),
+            'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+        })
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'admin_id': admin_id,
+                'is_active': new_status
+            },
+            'message': f'Admin {"activated" if new_status else "deactivated"} successfully!'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to toggle admin status',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/users/<admin_id>', methods=['DELETE'])
+def delete_admin_user(admin_id):
+    try:
+        # Find the admin to get details for logging
+        admin = admin_users_collection.find_one({'_id': ObjectId(admin_id)})
+        if not admin:
+            return jsonify({
+                'success': False,
+                'error': 'Admin user not found'
+            }), 404
+
+        # Delete the admin user
+        result = admin_users_collection.delete_one({'_id': ObjectId(admin_id)})
+
+        if result.deleted_count == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to delete admin user'
+            }), 500
+
+        # Log the deletion
+        admin_logs_collection.insert_one({
+            'admin_id': 'system',
+            'action': 'DELETE_ADMIN',
+            'details': {
+                'deleted_admin_id': admin_id,
+                'deleted_admin_name': admin['name'],
+                'deleted_admin_email': admin['email'],
+                'deleted_admin_role': admin['role']
+            },
+            'timestamp': datetime.utcnow(),
+            'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+        })
+
+        return jsonify({
+            'success': True,
+            'message': f'Admin user "{admin["name"]}" deleted successfully!'
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to delete admin user',
+            'message': str(e)
+        }), 500
+@app.route('/api/admin/logs', methods=['GET'])
+def get_admin_logs():
+    try:
+        # Get recent logs (last 100)
+        logs = list(admin_logs_collection.find().sort('timestamp', -1).limit(100))
+        
+        formatted_logs = []
+        for log in logs:
+            formatted_logs.append({
+                'id': str(log['_id']),
+                'admin_id': log['admin_id'],
+                'action': log['action'],
+                'details': log['details'],
+                'timestamp': log['timestamp'].isoformat(),
+                'ip_address': log.get('ip_address', 'Unknown')
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': formatted_logs
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch admin logs',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/logs', methods=['POST'])
+def log_admin_action():
+    try:
+        data = request.get_json()
+        
+        log_doc = {
+            'admin_id': data.get('admin_id', 'unknown'),
+            'action': data['action'],
+            'details': data.get('details', {}),
+            'timestamp': datetime.utcnow(),
+            'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+        }
+        
+        admin_logs_collection.insert_one(log_doc)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Admin action logged successfully'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to log admin action',
+            'message': str(e)
+        }), 500
+
 # Initialize database with sample data
 def init_db():
     try:
@@ -819,6 +1230,56 @@ def init_db():
             ]
             time_slots_collection.insert_many(slots)
             print("Sample time slots added to database")
+        
+        # Add sample admin users if none exist
+        if admin_users_collection.count_documents({}) == 0:
+            admin_users = [
+                {
+                    'name': 'Super Admin',
+                    'email': 'admin@booking.com',
+                    'password': 'admin123',  # In production, hash this password
+                    'role': 'Administrator',
+                    'permissions': ['all', 'bookings', 'halls', 'users', 'logs'],
+                    'is_active': True,
+                    'created_at': datetime.utcnow(),
+                    'last_login': None
+                },
+                {
+                    'name': 'Placement Admin',
+                    'email': 'placement@college.edu',
+                    'password': 'place123',
+                    'role': 'Placement Officer',
+                    'permissions': ['bookings', 'halls'],
+                    'is_active': True,
+                    'created_at': datetime.utcnow(),
+                    'last_login': None
+                },
+                {
+                    'name': 'Head Office Admin',
+                    'email': 'headoffice@org.com',
+                    'password': 'head123',
+                    'role': 'Head Office',
+                    'permissions': ['bookings', 'halls', 'users'],
+                    'is_active': True,
+                    'created_at': datetime.utcnow(),
+                    'last_login': None
+                },
+                {
+                    'name': 'Hall Manager',
+                    'email': 'manager@booking.com',
+                    'password': 'manager123',
+                    'role': 'Hall Manager',
+                    'permissions': ['halls', 'bookings'],
+                    'is_active': True,
+                    'created_at': datetime.utcnow(),
+                    'last_login': None
+                }
+            ]
+            admin_users_collection.insert_many(admin_users)
+            print("Sample admin users added to database")
+            print("Admin credentials:")
+            for user in admin_users:
+                print(f"  - {user['email']} / {user['password']} ({user['role']})")
             
     except Exception as e:
         print(f"Error initializing database: {e}")

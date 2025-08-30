@@ -168,8 +168,8 @@ const HomeScreen = ({ navigation }) => {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.adminButton} onPress={() => navigation.navigate('Admin')}>
-          <Text style={styles.adminButtonText}>Admin Panel</Text>
+        <TouchableOpacity style={styles.adminButton} onPress={() => navigation.navigate('AdminLogin')}>
+          <Text style={styles.adminButtonText}>🔐 Admin Login</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

@@ -9,11 +9,13 @@ import {
   ScrollView, 
   Alert,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  ActivityIndicator
 } from 'react-native';
+import bookingAPI from '../services/bookingApi';
 
 export default function BookingFormScreen({ route, navigation }) {
-  const { hall, timeSlot } = route.params;
+  const { hall, timeSlot, selectedDate } = route.params;
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -23,6 +25,7 @@ export default function BookingFormScreen({ route, navigation }) {
     description: '',
     attendees: '',
   });
+  const [loading, setLoading] = useState(false);
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({
@@ -67,19 +70,52 @@ export default function BookingFormScreen({ route, navigation }) {
     return true;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validateForm()) return;
     
-    const bookingData = {
-      ...formData,
-      hall,
-      timeSlot,
-      bookingId: Date.now().toString(),
-      status: 'pending',
-      submittedAt: new Date().toISOString(),
-    };
+    setLoading(true);
     
-    navigation.navigate('Confirmation', { booking: bookingData });
+    try {
+      const bookingData = {
+        hall_id: hall.id,
+        time_slot_id: timeSlot.id || timeSlot.slot_id,
+        booking_date: selectedDate,
+        requester_name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        organization: formData.organization || null,
+        event_title: formData.eventTitle,
+        purpose: formData.description || null,
+        attendees: parseInt(formData.attendees),
+        notes: `Event: ${formData.eventTitle}${formData.description ? ` - ${formData.description}` : ''}`,
+        status: 'pending'
+      };
+      
+      console.log('Submitting booking data:', bookingData);
+      const response = await bookingAPI.submitBooking(bookingData);
+      
+      if (response.success) {
+        const confirmationData = {
+          ...formData,
+          hall,
+          timeSlot: timeSlot.start_time && timeSlot.end_time ? `${timeSlot.start_time} - ${timeSlot.end_time}` : timeSlot,
+          booking_id: response.data?.booking_id || response.booking_id,
+          bookingId: response.data?.booking_id || response.booking_id,
+          status: 'pending',
+          submittedAt: new Date().toISOString(),
+        };
+        
+        navigation.navigate('Confirmation', { booking: confirmationData });
+        Alert.alert('Success', 'Booking request submitted successfully!');
+      } else {
+        Alert.alert('Error', response.error || 'Failed to submit booking request. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error submitting booking:', error);
+      Alert.alert('Error', 'Unable to submit booking request. Please check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -181,8 +217,16 @@ export default function BookingFormScreen({ route, navigation }) {
           </View>
         </ScrollView>
 
-        <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
-          <Text style={styles.submitButtonText}>Submit Booking Request</Text>
+        <TouchableOpacity 
+          style={[styles.submitButton, loading && styles.submitButtonDisabled]} 
+          onPress={handleSubmit}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="white" size="small" />
+          ) : (
+            <Text style={styles.submitButtonText}>Submit Booking Request</Text>
+          )}
         </TouchableOpacity>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -251,6 +295,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     marginTop: 16,
+    minHeight: 52,
+    justifyContent: 'center',
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#95a5a6',
+    opacity: 0.7,
   },
   submitButtonText: {
     color: 'white',

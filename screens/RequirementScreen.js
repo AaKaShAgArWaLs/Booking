@@ -10,8 +10,10 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Dimensions
+  Dimensions,
+  ActivityIndicator
 } from 'react-native';
+import bookingAPI from '../services/bookingApi';
 import { colors } from '../styles/colors';
 import { typography } from '../styles/typography';
 import { globalStyles } from '../styles/globalStyles';
@@ -32,7 +34,7 @@ const getResponsiveValue = (small, medium, large) => {
 };
 
 export default function RequirementScreen({ navigation }) {
-  const { selectedHall, selectedTimeSlots, updateForm, bookingForm } = useBooking();
+  const { selectedHall, selectedTimeSlots, updateForm, bookingForm, selectedDate } = useBooking();
   const [formData, setFormData] = useState({
     name: bookingForm.name || '',
     email: bookingForm.email || '',
@@ -42,6 +44,7 @@ export default function RequirementScreen({ navigation }) {
     description: bookingForm.description || '',
     attendees: bookingForm.attendees || '',
   });
+  const [loading, setLoading] = useState(false);
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({
@@ -86,21 +89,66 @@ export default function RequirementScreen({ navigation }) {
     return true;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validateForm()) return;
     
+    setLoading(true);
     updateForm(formData);
     
-    const bookingData = {
-      ...formData,
-      hall: selectedHall,
-      timeSlots: selectedTimeSlots,
-      bookingId: `BK${Date.now()}`,
-      status: 'pending',
-      submittedAt: new Date().toISOString(),
-    };
-    
-    navigation.navigate('Confirmation', { booking: bookingData });
+    try {
+      // Use the first selected time slot for API submission
+      const primaryTimeSlot = selectedTimeSlots[0];
+      
+      const bookingData = {
+        hall_id: selectedHall.id,
+        time_slot_id: primaryTimeSlot.id,
+        booking_date: selectedDate || new Date().toISOString().split('T')[0],
+        requester_name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        organization: formData.organization || null,
+        event_title: formData.eventTitle,
+        purpose: formData.description || null,
+        attendees: parseInt(formData.attendees),
+        notes: `Event: ${formData.eventTitle}${formData.description ? ` - ${formData.description}` : ''}`,
+        status: 'pending'
+      };
+      
+      console.log('=== BOOKING SUBMISSION DEBUG ===');
+      console.log('Selected Hall:', selectedHall);
+      console.log('Selected Time Slots:', selectedTimeSlots);
+      console.log('Primary Time Slot:', primaryTimeSlot);
+      console.log('Selected Date:', selectedDate);
+      console.log('Form Data:', formData);
+      console.log('Final Booking Data:', JSON.stringify(bookingData, null, 2));
+      console.log('API URL:', 'http://127.0.0.1:5000/api/bookings');
+      console.log('================================');
+      
+      const response = await bookingAPI.submitBooking(bookingData);
+      
+      if (response.success) {
+        const confirmationData = {
+          ...formData,
+          hall: selectedHall,
+          timeSlots: selectedTimeSlots,
+          timeSlot: selectedTimeSlots.map(slot => slot.time).join(', '),
+          booking_id: response.data?.booking_id || response.booking_id,
+          bookingId: response.data?.booking_id || response.booking_id,
+          status: 'pending',
+          submittedAt: new Date().toISOString(),
+        };
+        
+        navigation.navigate('Confirmation', { booking: confirmationData });
+        Alert.alert('Success', 'Booking request submitted successfully!');
+      } else {
+        Alert.alert('Error', response.error || 'Failed to submit booking request. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error submitting booking:', error);
+      Alert.alert('Error', 'Unable to submit booking request. Please check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!selectedHall || !selectedTimeSlots || selectedTimeSlots.length === 0) {
@@ -316,8 +364,16 @@ export default function RequirementScreen({ navigation }) {
         </ScrollView>
 
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
-            <Text style={styles.submitButtonText}>Submit Booking Request</Text>
+          <TouchableOpacity 
+            style={[styles.submitButton, loading && styles.submitButtonDisabled]} 
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="white" size="small" />
+            ) : (
+              <Text style={styles.submitButtonText}>Submit Booking Request</Text>
+            )}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -414,8 +470,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: getResponsiveValue(20, 24, 32),
     borderRadius: getResponsiveValue(8, 10, 12),
     alignItems: 'center',
+    justifyContent: 'center',
     ...globalStyles.shadow,
     minHeight: getResponsiveValue(48, 52, 60),
+  },
+  submitButtonDisabled: {
+    backgroundColor: colors.gray,
+    opacity: 0.7,
   },
   submitButtonText: {
     color: colors.white,
