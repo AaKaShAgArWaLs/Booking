@@ -1456,7 +1456,7 @@ const styles = StyleSheet.create({
   },
   
   // Header Styles
-  header: {
+   headerContainer: {
     backgroundColor: colors.primary,
     paddingTop: 20,
     paddingBottom: 40,
@@ -1464,10 +1464,25 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     position: 'relative',
   },
+
+  // Row layout for title + logout button
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    backgroundColor: '#3498db',
+    borderRadius: 10, // optional for rounded corners
+  },
+
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: colors.white,
+  },
+
   logoutButton: {
-    position: 'absolute',
-    top: 25,
-    right: 20,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.2)',
@@ -1477,20 +1492,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.3)',
   },
+
   logoutIcon: {
     fontSize: 16,
     marginRight: 6,
     color: colors.white,
   },
+
   logoutText: {
     color: colors.white,
     fontSize: 14,
     fontWeight: '600',
   },
-  headerContent: {
-    alignItems: 'center',
-  },
-  title: {
+title: {
     ...typography.h1,
     color: colors.white,
     fontWeight: 'bold',

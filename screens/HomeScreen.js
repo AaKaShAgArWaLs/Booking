@@ -90,8 +90,11 @@ const HomeScreen = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
+          
           <Text style={styles.welcomeText}>Welcome to</Text>
-          <Text style={styles.title}>Seminar Hall Booking</Text>
+         <TouchableOpacity onPress={loadHalls}>
+  <Text style={styles.title}>Seminar Hall Booking</Text>
+</TouchableOpacity>
           <Text style={styles.subtitle}>Choose your perfect venue</Text>
         </View>
 
