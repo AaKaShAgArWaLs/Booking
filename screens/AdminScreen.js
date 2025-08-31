@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
+  Linking,
 } from "react-native";
 import { Picker } from '@react-native-picker/picker';
 // Remove DateTimePicker import as it's causing issues on Android
@@ -106,6 +107,14 @@ const AdminScreen = ({ navigation, route }) => {
     capacity: '',
     features: '',
     icon: '🏛️'
+  });
+
+  // Reports states
+  const [reportsModalVisible, setReportsModalVisible] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportDateRange, setReportDateRange] = useState({
+    startDate: '',
+    endDate: ''
   });
 
   useEffect(() => {
@@ -284,11 +293,81 @@ const AdminScreen = ({ navigation, route }) => {
 
   // Generate Reports
   const handleGenerateReports = () => {
-    Alert.alert("Reports", "PDF/Excel reports will be generated here.");
+    // Initialize date range to last 30 days by default
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    
+    setReportDateRange({
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0]
+    });
+    setReportsModalVisible(true);
+  };
+
+  // Download file function for React Native
+  const downloadFile = async (blob, filename) => {
+    try {
+      if (Platform.OS === 'web') {
+        // Web platform - create download link
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        // React Native - you would typically use a library like react-native-fs or expo-file-system
+        // For now, we'll show an alert with the blob data
+        Alert.alert(
+          'Report Generated',
+          `Report "${filename}" has been generated successfully. In a production app, this would be saved to your device's downloads folder.`,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      Alert.alert('Error', 'Failed to download the report file.');
+    }
+  };
+
+  const generateReport = async (reportType, format) => {
+    setGeneratingReport(true);
+    try {
+      // Log admin action
+      await logAdminAction('GENERATE_REPORT', {
+        report_type: reportType,
+        format: format,
+        date_range: reportDateRange
+      });
+
+      let response;
+      if (reportType === 'bookings') {
+        response = await bookingAPI.generateBookingReport(format, reportDateRange);
+      } else if (reportType === 'utilization') {
+        response = await bookingAPI.generateHallUtilizationReport(format, reportDateRange);
+      }
+
+      if (response.success) {
+        await downloadFile(response.data, response.filename);
+        setReportsModalVisible(false);
+        Alert.alert('Success', `${format.toUpperCase()} report generated successfully!`);
+      } else {
+        Alert.alert('Error', response.error || 'Failed to generate report');
+      }
+    } catch (error) {
+      console.error('Error generating report:', error);
+      Alert.alert('Error', 'An unexpected error occurred while generating the report');
+    } finally {
+      setGeneratingReport(false);
+    }
   };
 
   // Priority Booking Functions
   const handlePriorityBooking = () => {
+    console.log('Opening priority booking modal');
     setPriorityBookingData({
       hall: '',
       date: '',
@@ -298,7 +377,16 @@ const AdminScreen = ({ navigation, route }) => {
       requester: '',
       otherReason: ''
     });
-    setAvailableTimeSlots([]);
+    
+    // Initialize with default time slots for priority booking
+    const defaultTimeSlots = [
+      { id: 'slot1', slot_id: 'slot1', start_time: '08:45', end_time: '10:45', label: '8:45 AM - 10:45 AM' },
+      { id: 'slot2', slot_id: 'slot2', start_time: '11:00', end_time: '12:45', label: '11:00 AM - 12:45 PM' },
+      { id: 'slot3', slot_id: 'slot3', start_time: '13:00', end_time: '15:45', label: '1:00 PM - 3:45 PM' }
+    ];
+    console.log('Setting default time slots:', defaultTimeSlots);
+    setAvailableTimeSlots(defaultTimeSlots);
+    
     const today = new Date();
     setSelectedDate(today);
     setTempSelectedDate(today);
@@ -322,21 +410,31 @@ const AdminScreen = ({ navigation, route }) => {
     if (updatedData.hall && updatedData.date && (field === 'hall' || field === 'date')) {
       setLoadingTimeSlots(true);
       try {
-        const response = await bookingAPI.getTimeSlots(updatedData.hall, updatedData.date);
-        if (response.success && response.data) {
-          console.log('Time slots loaded:', response.data);
+        // For priority bookings, always try to get ALL time slots (including unavailable ones)
+        const response = await bookingAPI.getAllTimeSlots(updatedData.hall, updatedData.date);
+        if (response.success && response.data && response.data.length > 0) {
+          console.log('All time slots loaded for priority booking:', response.data);
           setAvailableTimeSlots(response.data);
         } else {
-          console.log('No time slots available:', response);
-          setAvailableTimeSlots([]);
-          if (updatedData.hall && updatedData.date) {
-            Alert.alert('Info', 'No time slots available for selected hall and date');
-          }
+          console.log('Fallback to default time slots for priority booking');
+          // Fallback to default time slots
+          const defaultTimeSlots = [
+            { id: 'slot1', slot_id: 'slot1', start_time: '08:45', end_time: '10:45', label: '8:45 AM - 10:45 AM' },
+            { id: 'slot2', slot_id: 'slot2', start_time: '11:00', end_time: '12:45', label: '11:00 AM - 12:45 PM' },
+            { id: 'slot3', slot_id: 'slot3', start_time: '13:00', end_time: '15:45', label: '1:00 PM - 3:45 PM' }
+          ];
+          setAvailableTimeSlots(defaultTimeSlots);
         }
       } catch (error) {
         console.error('Error loading time slots:', error);
-        setAvailableTimeSlots([]);
-        Alert.alert('Error', 'Failed to load time slots. Please try again.');
+        // For priority booking, still provide default time slots even on error
+        const defaultTimeSlots = [
+          { id: 'slot1', slot_id: 'slot1', start_time: '08:45', end_time: '10:45', label: '8:45 AM - 10:45 AM' },
+          { id: 'slot2', slot_id: 'slot2', start_time: '11:00', end_time: '12:45', label: '11:00 AM - 12:45 PM' },
+          { id: 'slot3', slot_id: 'slot3', start_time: '13:00', end_time: '15:45', label: '1:00 PM - 3:45 PM' }
+        ];
+        setAvailableTimeSlots(defaultTimeSlots);
+        console.log('Using default time slots for priority booking due to error');
       } finally {
         setLoadingTimeSlots(false);
       }
@@ -430,8 +528,15 @@ const AdminScreen = ({ navigation, route }) => {
   };
 
   const submitPriorityBooking = async () => {
+    console.log('Submitting priority booking with data:', priorityBookingData);
+    
     if (!priorityBookingData.hall || !priorityBookingData.date || !priorityBookingData.time) {
       Alert.alert("Error", "Please fill all required fields");
+      console.log('Missing required fields:', {
+        hall: priorityBookingData.hall,
+        date: priorityBookingData.date,
+        time: priorityBookingData.time
+      });
       return;
     }
 
@@ -695,10 +800,6 @@ const AdminScreen = ({ navigation, route }) => {
       >
         {/* Professional Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutIcon}>👤</Text>
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
           <View style={styles.headerContent}>
             <Text style={styles.title}>Admin Dashboard</Text>
             <Text style={styles.subtitle}>
@@ -1037,14 +1138,28 @@ const AdminScreen = ({ navigation, route }) => {
         </View>
       </ScrollView>
 
+      {/* Footer with Logout */}
+      <View style={styles.footer}>
+        <TouchableOpacity style={styles.footerLogoutButton} onPress={handleLogout}>
+          <Text style={styles.logoutIcon}>👤</Text>
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Reject Reason Modal */}
       <Modal
         visible={modalVisible}
         transparent
         animationType="slide"
         onRequestClose={() => setModalVisible(false)}
+        accessible={true}
+        accessibilityViewIsModal={true}
       >
-        <View style={styles.modalOverlay}>
+        <View 
+          style={styles.modalOverlay}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        >
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>
               {selectedBooking?.status === "approved"
@@ -1081,8 +1196,14 @@ const AdminScreen = ({ navigation, route }) => {
         transparent
         animationType="slide"
         onRequestClose={() => setPriorityModalVisible(false)}
+        accessible={true}
+        accessibilityViewIsModal={true}
       >
-        <View style={styles.modalOverlay}>
+        <View 
+          style={styles.modalOverlay}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        >
           <View style={styles.priorityModalContainer}>
             <ScrollView 
               showsVerticalScrollIndicator={false}
@@ -1143,7 +1264,14 @@ const AdminScreen = ({ navigation, route }) => {
                     <Picker
                       selectedValue={priorityBookingData.time}
                       onValueChange={(value) => {
-                        console.log('Selected time slot:', value);
+                        console.log('Selected time slot value:', value);
+                        console.log('Available time slots:', availableTimeSlots);
+                        const selectedSlot = availableTimeSlots.find(slot => 
+                          (slot.id && slot.id === value) || 
+                          (slot.slot_id && slot.slot_id === value) || 
+                          `slot-${availableTimeSlots.indexOf(slot)}` === value
+                        );
+                        console.log('Found selected slot:', selectedSlot);
                         setPriorityBookingData({...priorityBookingData, time: value});
                       }}
                       style={styles.picker}
@@ -1157,13 +1285,21 @@ const AdminScreen = ({ navigation, route }) => {
                       ) : (
                         <>
                           <Picker.Item label="Select Time Slot" value="" />
-                          {availableTimeSlots.map((slot) => (
-                            <Picker.Item 
-                              key={slot.id || slot.slot_id} 
-                              label={`${slot.start_time} - ${slot.end_time}`} 
-                              value={slot.id || slot.slot_id} 
-                            />
-                          ))}
+                          {availableTimeSlots.map((slot, index) => {
+                            const displayLabel = slot.label || 
+                              (slot.start_time && slot.end_time ? `${slot.start_time} - ${slot.end_time}` : `Time Slot ${index + 1}`);
+                            
+                            // Ensure we always have a valid value - never undefined
+                            const slotValue = slot.id || slot.slot_id || `slot-${index}`;
+                            
+                            return (
+                              <Picker.Item 
+                                key={slotValue} 
+                                label={displayLabel} 
+                                value={slotValue} 
+                              />
+                            );
+                          })}
                         </>
                       )}
                     </Picker>
@@ -1309,8 +1445,14 @@ const AdminScreen = ({ navigation, route }) => {
         transparent
         animationType="slide"
         onRequestClose={() => setAdminModalVisible(false)}
+        accessible={true}
+        accessibilityViewIsModal={true}
       >
-        <View style={styles.modalOverlay}>
+        <View 
+          style={styles.modalOverlay}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        >
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>
               {selectedAdmin ? '✏️ Edit Admin' : '➕ Add New Admin'}
@@ -1373,8 +1515,14 @@ const AdminScreen = ({ navigation, route }) => {
         transparent
         animationType="slide"
         onRequestClose={() => setHallModalVisible(false)}
+        accessible={true}
+        accessibilityViewIsModal={true}
       >
-        <View style={styles.modalOverlay}>
+        <View 
+          style={styles.modalOverlay}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        >
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>🏛️ Add New Hall</Text>
             
@@ -1445,6 +1593,101 @@ const AdminScreen = ({ navigation, route }) => {
           </View>
         </View>
       </Modal>
+
+      {/* Reports Generation Modal */}
+      <Modal
+        visible={reportsModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReportsModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>📊 Generate Reports</Text>
+            
+            {/* Date Range Selection */}
+            <Text style={styles.dropdownLabel}>Report Period</Text>
+            <View style={styles.dateRangeContainer}>
+              <View style={styles.dateInputContainer}>
+                <Text style={styles.dateLabel}>From:</Text>
+                <TextInput
+                  style={styles.dateInput}
+                  placeholder="YYYY-MM-DD"
+                  value={reportDateRange.startDate}
+                  onChangeText={(text) => setReportDateRange({...reportDateRange, startDate: text})}
+                />
+              </View>
+              <View style={styles.dateInputContainer}>
+                <Text style={styles.dateLabel}>To:</Text>
+                <TextInput
+                  style={styles.dateInput}
+                  placeholder="YYYY-MM-DD"
+                  value={reportDateRange.endDate}
+                  onChangeText={(text) => setReportDateRange({...reportDateRange, endDate: text})}
+                />
+              </View>
+            </View>
+
+            {/* Report Type Selection */}
+            <Text style={styles.sectionTitle}>📋 Booking Reports</Text>
+            <View style={styles.reportButtonsContainer}>
+              <TouchableOpacity
+                style={[styles.reportButton, styles.pdfButton]}
+                onPress={() => generateReport('bookings', 'pdf')}
+                disabled={generatingReport}
+              >
+                <Text style={styles.reportButtonIcon}>📄</Text>
+                <Text style={styles.reportButtonText}>PDF Report</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.reportButton, styles.excelButton]}
+                onPress={() => generateReport('bookings', 'excel')}
+                disabled={generatingReport}
+              >
+                <Text style={styles.reportButtonIcon}>📊</Text>
+                <Text style={styles.reportButtonText}>Excel Report</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sectionTitle}>📈 Hall Utilization Reports</Text>
+            <View style={styles.reportButtonsContainer}>
+              <TouchableOpacity
+                style={[styles.reportButton, styles.pdfButton]}
+                onPress={() => generateReport('utilization', 'pdf')}
+                disabled={generatingReport}
+              >
+                <Text style={styles.reportButtonIcon}>📄</Text>
+                <Text style={styles.reportButtonText}>PDF Report</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.reportButton, styles.excelButton]}
+                onPress={() => generateReport('utilization', 'excel')}
+                disabled={generatingReport}
+              >
+                <Text style={styles.reportButtonIcon}>📊</Text>
+                <Text style={styles.reportButtonText}>Excel Report</Text>
+              </TouchableOpacity>
+            </View>
+
+            {generatingReport && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.loadingText}>Generating report...</Text>
+              </View>
+            )}
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.button, styles.reject]}
+                onPress={() => setReportsModalVisible(false)}
+                disabled={generatingReport}
+              >
+                <Text style={styles.btnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1465,15 +1708,16 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
 
-  // Row layout for title + logout button
+  // Header layout for title only
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 15,
-    paddingVertical: 12,
+    paddingVertical: 20,
     backgroundColor: '#3498db',
-    borderRadius: 10, // optional for rounded corners
+    marginBottom: 20,
+  },
+  
+  headerContent: {
+    alignItems: 'center',
   },
 
   headerTitle: {
@@ -1482,15 +1726,26 @@ const styles = StyleSheet.create({
     color: colors.white,
   },
 
-  logoutButton: {
+  // Footer with logout button
+  footer: {
+    backgroundColor: colors.white,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    alignItems: 'center',
+    ...globalStyles.shadow,
+  },
+
+  footerLogoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: colors.danger,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+    minWidth: 120,
+    justifyContent: 'center',
   },
 
   logoutIcon: {
@@ -2218,6 +2473,66 @@ title: {
     justifyContent: 'center',
   },
   emptyStateButtonText: {
+    color: colors.white,
+    fontSize: getResponsiveValue(14, 16, 18),
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  // Reports Modal Styles
+  dateRangeContainer: {
+    marginBottom: getResponsiveValue(20, 24, 28),
+  },
+  dateInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: getResponsiveValue(12, 16, 20),
+  },
+  dateLabel: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    fontWeight: '600',
+    color: colors.text,
+    marginRight: 12,
+    minWidth: 50,
+  },
+  dateInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: getResponsiveValue(8, 10, 12),
+    padding: getResponsiveValue(10, 12, 14),
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    backgroundColor: colors.background,
+  },
+  reportButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: getResponsiveValue(20, 24, 28),
+  },
+  reportButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: getResponsiveValue(12, 16, 20),
+    paddingHorizontal: getResponsiveValue(16, 20, 24),
+    borderRadius: getResponsiveValue(8, 10, 12),
+    marginHorizontal: getResponsiveValue(4, 6, 8),
+    minHeight: getResponsiveValue(48, 52, 56),
+    ...globalStyles.shadow,
+  },
+  pdfButton: {
+    backgroundColor: colors.danger,
+  },
+  excelButton: {
+    backgroundColor: colors.success,
+  },
+  reportButtonIcon: {
+    fontSize: getResponsiveValue(20, 22, 24),
+    marginRight: getResponsiveValue(8, 10, 12),
+  },
+  reportButtonText: {
     color: colors.white,
     fontSize: getResponsiveValue(14, 16, 18),
     fontWeight: '600',

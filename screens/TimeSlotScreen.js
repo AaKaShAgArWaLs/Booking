@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   Platform,
   Modal,
+  TextInput,
 } from 'react-native';
 import { globalStyles } from '../styles/globalStyles';
 import { colors } from '../styles/colors';
@@ -37,13 +38,17 @@ const TimeSlotScreen = ({ navigation }) => {
   const { 
     selectedHall, 
     selectedTimeSlots, 
-    toggleTimeSlot 
+    toggleTimeSlot,
+    bookingForm,
+    selectDate
   } = useBooking();
   
   const [timeSlots, setTimeSlots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showUserIdentification, setShowUserIdentification] = useState(false);
+  const [tempUserData, setTempUserData] = useState({ email: '', phone: '' });
 
   useEffect(() => {
     if (!selectedHall) {
@@ -52,33 +57,78 @@ const TimeSlotScreen = ({ navigation }) => {
       ]);
       return;
     }
+    
+    // Initialize context with today's date
+    selectDate(selectedDate.toISOString().split('T')[0]);
+    
+    // Load time slots regardless of user identification - we can handle it during booking
     loadTimeSlots();
   }, [selectedHall, selectedDate]);
 
   const loadTimeSlots = async () => {
     try {
       setLoading(true);
+      console.log('🔍 Loading time slots...');
       
       // Format date for API call (YYYY-MM-DD)
       const formattedDate = selectedDate.toISOString().split('T')[0];
       
-      // API call with both hall ID and selected date
-      const response = await bookingAPI.getTimeSlots(selectedHall.id, formattedDate);
+      console.log('🔍 Loading time slots with params:', {
+        hallId: selectedHall.id,
+        date: formattedDate
+      });
       
-      if (response.success) {
-        setTimeSlots(response.data);
-      } else {
-        Alert.alert('Error', response.message || 'Failed to load time slots for selected date');
+      // Get available time slots for the hall
+      const timeSlotsResponse = await bookingAPI.getTimeSlots(selectedHall.id, formattedDate, null);
+      
+      console.log('📡 Time slots API response:', timeSlotsResponse);
+      
+      if (!timeSlotsResponse.success) {
+        Alert.alert('Error', timeSlotsResponse.message || 'Failed to load time slots for selected date');
+        return;
       }
+      
+      setTimeSlots(timeSlotsResponse.data || []);
+      
+      // Debug: Log each time slot's availability
+      console.log('📝 Time slots received:');
+      (timeSlotsResponse.data || []).forEach((slot, index) => {
+        console.log(`  ${index + 1}. ${slot.time} - Available: ${slot.available}, Reason: ${slot.reason || 'N/A'}`);
+      });
+      
     } catch (error) {
-      Alert.alert('Error', 'Unable to load time slots. Please check your connection.');
-      console.error('Error loading time slots:', error);
+      console.error('💥 Error loading time slots:', error);
+      
+      let errorMessage = 'Unable to load time slots. ';
+      
+      if (error.message.includes('fetch')) {
+        errorMessage += 'Network connection failed. Please check:\n\n1. Backend server is running\n2. Internet connection is available\n3. API URL is correct (localhost:5000)';
+      } else if (error.message.includes('timeout')) {
+        errorMessage += 'Request timed out. The server might be slow or unreachable.';
+      } else {
+        errorMessage += `Error details: ${error.message}`;
+      }
+      
+      Alert.alert('Connection Error', errorMessage, [
+        { text: 'OK' },
+        { text: 'Retry', onPress: () => loadTimeSlots() }
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
+  const isSlotAvailable = (timeSlot) => {
+    // Check both available and isAvailable properties for compatibility
+    return timeSlot.available !== false && timeSlot.isAvailable !== false;
+  };
+
   const handleTimeSlotToggle = (timeSlot) => {
+    // Don't allow toggling unavailable slots
+    if (!isSlotAvailable(timeSlot)) {
+      return;
+    }
+    
     // If selecting "Full Day", deselect all other slots
     if (timeSlot.id === '4') {
       // Clear all other selections first
@@ -103,11 +153,20 @@ const TimeSlotScreen = ({ navigation }) => {
       Alert.alert('Selection Required', 'Please select at least one time slot');
       return;
     }
-    navigation.navigate('Requirements');
+    
+    // Pass user identification data to Requirements screen if available
+    const navigationParams = {};
+    if (tempUserData.email || tempUserData.phone) {
+      navigationParams.prefilledUserData = tempUserData;
+    }
+    
+    navigation.navigate('Requirements', navigationParams);
   };
 
   const handleDateChange = (date) => {
     setSelectedDate(date);
+    // Update the global context with formatted date string
+    selectDate(date.toISOString().split('T')[0]);
     setShowDatePicker(false);
     // Clear selected slots when date changes
     selectedTimeSlots.forEach(slot => toggleTimeSlot(slot));
@@ -202,6 +261,15 @@ const TimeSlotScreen = ({ navigation }) => {
           <Text style={styles.dateHint}>
             You can book up to 3 months in advance
           </Text>
+          
+          {selectedDate.getDay() === 0 && (
+            <View style={styles.sundayNotice}>
+              <Text style={styles.sundayNoticeIcon}>ℹ️</Text>
+              <Text style={styles.sundayNoticeText}>
+                Sunday bookings are only available through priority requests. Please contact admin if you need to book for Sunday.
+              </Text>
+            </View>
+          )}
         </View>
 
         <View style={[globalStyles.card, styles.timeSlotsCard]}>
@@ -212,19 +280,19 @@ const TimeSlotScreen = ({ navigation }) => {
               <CustomCheckbox
                 label={`${timeSlot.time} (${timeSlot.duration})`}
                 checked={isTimeSlotSelected(timeSlot)}
-                onPress={() => timeSlot.available ? handleTimeSlotToggle(timeSlot) : null}
+                onPress={() => handleTimeSlotToggle(timeSlot)}
                 style={[
                   styles.timeSlotCheckbox,
-                  !timeSlot.available && styles.unavailableSlot
+                  !isSlotAvailable(timeSlot) && styles.unavailableSlot
                 ]}
-                disabled={!timeSlot.available}
+                disabled={!isSlotAvailable(timeSlot)}
               />
-              {!timeSlot.available && timeSlot.reason && (
+              {!isSlotAvailable(timeSlot) && timeSlot.reason && (
                 <Text style={styles.unavailableReason}>
                   ❌ {timeSlot.reason}
                 </Text>
               )}
-              {timeSlot.available && (
+              {isSlotAvailable(timeSlot) && (
                 <Text style={styles.availableIndicator}>✅ Available</Text>
               )}
             </View>
@@ -273,9 +341,20 @@ const TimeSlotScreen = ({ navigation }) => {
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowDatePicker(false)}
+        accessible={true}
+        accessibilityViewIsModal={true}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.datePickerModal}>
+        <View 
+          style={styles.modalOverlay}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        >
+          <View 
+            style={styles.datePickerModal}
+            accessible={true}
+            accessibilityRole="dialog"
+            accessibilityLabel="Select booking date"
+          >
             <Text style={styles.modalTitle}>Select Date</Text>
             
             <ScrollView style={styles.dateScrollView} showsVerticalScrollIndicator={false}>
@@ -315,6 +394,72 @@ const TimeSlotScreen = ({ navigation }) => {
             >
               <Text style={styles.modalCloseText}>Cancel</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* User Identification Modal for Double-Booking Prevention */}
+      <Modal
+        visible={showUserIdentification}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {}}
+        accessible={true}
+        accessibilityViewIsModal={true}
+      >
+        <View 
+          style={styles.modalOverlay}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        >
+          <View 
+            style={styles.userIdModal}
+            accessible={true}
+            accessibilityRole="dialog"
+            accessibilityLabel="User identification for booking"
+          >
+            <Text style={styles.modalTitle}>User Identification</Text>
+            <Text style={styles.modalSubtitle}>
+              To prevent double bookings, please provide your email or phone number
+            </Text>
+            
+            <TextInput
+              style={styles.userIdInput}
+              placeholder="Email Address"
+              value={tempUserData.email}
+              onChangeText={(text) => setTempUserData(prev => ({ ...prev, email: text }))}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            
+            <Text style={styles.orText}>OR</Text>
+            
+            <TextInput
+              style={styles.userIdInput}
+              placeholder="Phone Number"
+              value={tempUserData.phone}
+              onChangeText={(text) => setTempUserData(prev => ({ ...prev, phone: text }))}
+              keyboardType="phone-pad"
+            />
+            
+            <TouchableOpacity 
+              style={[
+                styles.userIdButton,
+                (!tempUserData.email && !tempUserData.phone) && styles.userIdButtonDisabled
+              ]} 
+              onPress={() => {
+                if (tempUserData.email || tempUserData.phone) {
+                  setShowUserIdentification(false);
+                }
+              }}
+              disabled={!tempUserData.email && !tempUserData.phone}
+            >
+              <Text style={styles.userIdButtonText}>Continue</Text>
+            </TouchableOpacity>
+            
+            <Text style={styles.privacyNote}>
+              This information is only used to prevent double bookings and will be included in your booking details.
+            </Text>
           </View>
         </View>
       </Modal>
@@ -393,6 +538,28 @@ const styles = StyleSheet.create({
     fontSize: getResponsiveValue(12, 14, 16),
     color: '#B45309',
     textAlign: 'center',
+  },
+  sundayNotice: {
+    backgroundColor: '#E3F2FD',
+    padding: getResponsiveValue(12, 14, 16),
+    borderRadius: getResponsiveValue(8, 10, 12),
+    marginTop: getResponsiveValue(12, 14, 16),
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  sundayNoticeIcon: {
+    fontSize: getResponsiveValue(16, 18, 20),
+    marginRight: getResponsiveValue(8, 10, 12),
+    marginTop: 2,
+  },
+  sundayNoticeText: {
+    fontSize: getResponsiveValue(12, 14, 16),
+    color: colors.primary,
+    flex: 1,
+    lineHeight: getResponsiveValue(18, 20, 22),
+    fontWeight: '500',
   },
   timeSlotsCard: {
     marginHorizontal: getResponsiveValue(16, 20, 32),
@@ -555,6 +722,64 @@ const styles = StyleSheet.create({
     fontSize: getResponsiveValue(14, 16, 18),
     color: colors.white,
     fontWeight: '600',
+  },
+
+  // User Identification Modal Styles
+  userIdModal: {
+    backgroundColor: colors.white,
+    borderRadius: getResponsiveValue(12, 16, 20),
+    padding: getResponsiveValue(20, 24, 28),
+    width: getResponsiveValue('90%', '80%', '70%'),
+    maxWidth: 400,
+    ...globalStyles.shadow,
+  },
+  modalSubtitle: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.textLight,
+    textAlign: 'center',
+    marginBottom: getResponsiveValue(20, 24, 28),
+    lineHeight: getResponsiveValue(20, 24, 26),
+  },
+  userIdInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: getResponsiveValue(8, 10, 12),
+    padding: getResponsiveValue(12, 16, 18),
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    backgroundColor: colors.background,
+    marginBottom: getResponsiveValue(12, 16, 18),
+  },
+  orText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.textLight,
+    textAlign: 'center',
+    marginVertical: getResponsiveValue(8, 10, 12),
+    fontWeight: '600',
+  },
+  userIdButton: {
+    backgroundColor: colors.primary,
+    padding: getResponsiveValue(14, 18, 20),
+    borderRadius: getResponsiveValue(8, 10, 12),
+    alignItems: 'center',
+    marginTop: getResponsiveValue(12, 16, 18),
+    marginBottom: getResponsiveValue(16, 20, 24),
+  },
+  userIdButtonDisabled: {
+    backgroundColor: colors.gray,
+    opacity: 0.6,
+  },
+  userIdButtonText: {
+    fontSize: getResponsiveValue(16, 18, 20),
+    color: colors.white,
+    fontWeight: '600',
+  },
+  privacyNote: {
+    fontSize: getResponsiveValue(12, 14, 16),
+    color: colors.textLight,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    lineHeight: getResponsiveValue(16, 18, 20),
   },
 });
 

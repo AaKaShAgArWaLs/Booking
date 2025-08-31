@@ -66,6 +66,17 @@ def get_halls():
 def get_time_slots(hall_id):
     try:
         date_str = request.args.get('date')
+        user_email = request.args.get('userEmail')
+        user_phone = request.args.get('userPhone')
+        show_all = request.args.get('showAll', 'false').lower() == 'true'
+        is_priority = request.args.get('priority', 'false').lower() == 'true'
+        
+        print(f"=== TIME SLOTS API DEBUG ===")
+        print(f"Request args: {dict(request.args)}")
+        print(f"is_priority: {is_priority}")
+        print(f"show_all: {show_all}")
+        print("===============================")
+        
         if not date_str:
             date_str = datetime.now().strftime('%Y-%m-%d')
         
@@ -84,8 +95,28 @@ def get_time_slots(hall_id):
             'booking_date': date_str,
             'status': {'$in': ['pending', 'approved']}
         }))
+
+        print(f"Existing bookings for hall {hall_id} on {date_str}: {existing_bookings}")
         
         booked_slot_ids = {str(booking['time_slot_id']) for booking in existing_bookings}
+        print(f"Booked slot IDs for hall {hall_id} on {date_str}: {booked_slot_ids}")
+        # Get user's existing bookings for this date (for double-booking prevention)
+        user_bookings = []
+        if user_email or user_phone:
+            user_query = {}
+            if user_email and user_phone:
+                user_query['$or'] = [{'email': user_email}, {'phone': user_phone}]
+            elif user_email:
+                user_query['email'] = user_email
+            elif user_phone:
+                user_query['phone'] = user_phone
+                
+            user_query['booking_date'] = date_str
+            user_query['status'] = {'$in': ['pending', 'approved']}
+            
+            user_bookings = list(bookings_collection.find(user_query))
+        
+        user_booked_slot_ids = {str(booking['time_slot_id']) for booking in user_bookings}
         
         # Get maintenance schedules
         maintenance = list(maintenance_collection.find({
@@ -103,20 +134,38 @@ def get_time_slots(hall_id):
             is_available = True
             reason = None
             
-            # If hall is unavailable, no slots are bookable
-            if not hall_available:
-                is_available = False
-                reason = 'Hall is currently unavailable'
-            elif slot_id in booked_slot_ids:
-                is_available = False
-                reason = 'Already booked'
-            elif slot_id in maintenance_slot_ids:
-                is_available = False
-                reason = 'Maintenance scheduled'
-            elif booking_date.weekday() in [5, 6]:  # Weekend restrictions
-                if slot.get('slot_order', 0) in [1, 2]:  # Early morning slots
+            # Priority bookings can override all restrictions except hall availability
+            if is_priority:
+                # Only check if hall is available for priority bookings
+                if not hall_available:
                     is_available = False
-                    reason = 'Not available on weekends'
+                    reason = 'Hall is currently unavailable'
+                # For priority bookings, show information about existing bookings but don't block
+                elif slot_id in booked_slot_ids:
+                    reason = 'Currently booked (can override with priority)'
+                elif slot_id in maintenance_slot_ids:
+                    reason = 'Maintenance scheduled (can override with priority)'
+            else:
+                # Regular booking restrictions
+                if not hall_available:
+                    is_available = False
+                    reason = 'Hall is currently unavailable'
+                elif slot_id in user_booked_slot_ids:
+                    is_available = False
+                    reason = 'You already have a booking for this time slot'
+                elif slot_id in booked_slot_ids and not show_all:
+                    is_available = False
+                    reason = 'Already booked'
+                elif slot_id in maintenance_slot_ids:
+                    is_available = False
+                    reason = 'Maintenance scheduled'
+                elif booking_date.weekday() == 6:  # Sunday restrictions (weekday 6 = Sunday)
+                    is_available = False
+                    reason = 'Sunday bookings are only available for priority requests'
+                elif booking_date.weekday() == 5:  # Saturday restrictions (weekday 5 = Saturday)
+                    if slot.get('slot_order', 0) in [1, 2]:  # Early morning slots
+                        is_available = False
+                        reason = 'Early morning slots not available on Saturdays'
             
             available_slots.append({
                 'id': slot_id,
@@ -173,6 +222,14 @@ def create_booking():
             return jsonify({"success": False, "error": "Hall not found"}), 404
         if not time_slot:
             return jsonify({"success": False, "error": "Time slot not found"}), 404
+
+        # Check for Sunday booking restriction (regular bookings only)
+        booking_date = datetime.strptime(data['booking_date'], '%Y-%m-%d').date()
+        if booking_date.weekday() == 6:  # Sunday (weekday 6 = Sunday)
+            return jsonify({
+                "success": False, 
+                "error": "Sunday bookings are not available for regular requests. Please contact admin for priority booking."
+            }), 403
 
         # Check if slot is already booked
         existing_booking = bookings_collection.find_one({
@@ -280,6 +337,75 @@ def get_all_bookings():
         return jsonify({
             'success': False,
             'error': 'Failed to fetch bookings',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/bookings/user-bookings', methods=['GET'])
+def get_user_bookings_for_date():
+    try:
+        date_str = request.args.get('date')
+        user_email = request.args.get('userEmail')
+        user_phone = request.args.get('userPhone')
+        user_id = request.args.get('userId')
+        
+        if not date_str:
+            return jsonify({
+                'success': False,
+                'error': 'Date parameter is required'
+            }), 400
+        
+        # Build query for user identification
+        user_query = {'booking_date': date_str, 'status': {'$in': ['pending', 'approved']}}
+        
+        if user_id:
+            user_query['user_id'] = user_id
+        elif user_email and user_phone:
+            user_query['$or'] = [{'email': user_email}, {'phone': user_phone}]
+        elif user_email:
+            user_query['email'] = user_email
+        elif user_phone:
+            user_query['phone'] = user_phone
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'User identification required (email, phone, or userId)'
+            }), 400
+        
+        # Find user's bookings for this date
+        user_bookings = list(bookings_collection.find(user_query))
+        
+        # Format response with hall and time slot details
+        result_bookings = []
+        for booking in user_bookings:
+            # Get hall details
+            hall = halls_collection.find_one({'_id': ObjectId(booking['hall_id'])})
+            time_slot = time_slots_collection.find_one({'_id': ObjectId(booking['time_slot_id'])})
+            
+            result_bookings.append({
+                'id': str(booking['_id']),
+                'booking_id': booking['booking_id'],
+                'hall_id': booking['hall_id'],
+                'time_slot_id': booking['time_slot_id'],
+                'start_time': time_slot.get('start_time') if time_slot else None,
+                'end_time': time_slot.get('end_time') if time_slot else None,
+                'hall_name': hall['name'] if hall else 'Unknown Hall',
+                'time_slot_name': time_slot['time'] if time_slot else 'Unknown Time',
+                'booking_date': booking['booking_date'],
+                'status': booking['status'],
+                'event_title': booking.get('event_title', ''),
+                'submitted_at': booking['submitted_at'].isoformat()
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': result_bookings,
+            'message': f'Found {len(result_bookings)} booking(s) for {date_str}'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to check existing bookings',
             'message': str(e)
         }), 500
 
@@ -1133,6 +1259,181 @@ def log_admin_action():
         return jsonify({
             'success': False,
             'error': 'Failed to log admin action',
+            'message': str(e)
+        }), 500
+
+# Report Generation Endpoints
+
+@app.route('/api/admin/reports/bookings', methods=['GET'])
+def generate_booking_report():
+    try:
+        report_type = request.args.get('type', 'pdf')  # 'pdf' or 'excel'
+        start_date = request.args.get('startDate')
+        end_date = request.args.get('endDate')
+        
+        # Build query for date range
+        query = {}
+        if start_date and end_date:
+            query['booking_date'] = {'$gte': start_date, '$lte': end_date}
+        elif start_date:
+            query['booking_date'] = {'$gte': start_date}
+        elif end_date:
+            query['booking_date'] = {'$lte': end_date}
+        else:
+            # Default to last 30 days if no date range specified
+            from datetime import timedelta
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            query['booking_date'] = {'$gte': start_date, '$lte': end_date}
+        
+        # Get bookings data
+        bookings = list(bookings_collection.find(query).sort('booking_date', -1))
+        
+        # Enrich with hall and time slot data
+        report_data = []
+        for booking in bookings:
+            hall = halls_collection.find_one({'_id': ObjectId(booking['hall_id'])})
+            time_slot = time_slots_collection.find_one({'_id': ObjectId(booking['time_slot_id'])})
+            
+            report_data.append({
+                'booking_id': booking['booking_id'],
+                'booking_date': booking['booking_date'],
+                'hall_name': hall['name'] if hall else 'Unknown Hall',
+                'hall_location': hall['location'] if hall else 'Unknown Location',
+                'time_slot': time_slot['time'] if time_slot else 'Unknown Time',
+                'requester_name': booking['name'],
+                'requester_email': booking['email'],
+                'organization': booking.get('organization', ''),
+                'event_title': booking['event_title'],
+                'attendees': booking['attendees'],
+                'status': booking['status'],
+                'submitted_at': booking['submitted_at'].strftime('%Y-%m-%d %H:%M:%S'),
+                'approved_at': booking['approved_at'].strftime('%Y-%m-%d %H:%M:%S') if booking.get('approved_at') else '',
+                'rejection_reason': booking.get('rejection_reason', '')
+            })
+        
+        if report_type.lower() == 'pdf':
+            return generate_pdf_report(report_data, 'Booking Report', f'Booking Report ({start_date} to {end_date})')
+        else:  # excel
+            return generate_excel_report(report_data, 'Booking Report', f'booking-report-{start_date}-to-{end_date}.xlsx')
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to generate booking report',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/reports/utilization', methods=['GET'])
+def generate_utilization_report():
+    try:
+        report_type = request.args.get('type', 'pdf')
+        start_date = request.args.get('startDate')
+        end_date = request.args.get('endDate')
+        
+        # Build query for date range
+        query = {}
+        if start_date and end_date:
+            query['booking_date'] = {'$gte': start_date, '$lte': end_date}
+        elif start_date:
+            query['booking_date'] = {'$gte': start_date}
+        elif end_date:
+            query['booking_date'] = {'$lte': end_date}
+        else:
+            # Default to last 30 days
+            from datetime import timedelta
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            query['booking_date'] = {'$gte': start_date, '$lte': end_date}
+        
+        # Get utilization statistics
+        halls = list(halls_collection.find({'is_active': True}))
+        time_slots = list(time_slots_collection.find({'is_active': True}))
+        
+        utilization_data = []
+        for hall in halls:
+            hall_stats = {
+                'hall_name': hall['name'],
+                'hall_location': hall['location'],
+                'capacity': hall['capacity'],
+                'total_bookings': 0,
+                'approved_bookings': 0,
+                'pending_bookings': 0,
+                'rejected_bookings': 0,
+                'utilization_rate': 0
+            }
+            
+            # Get bookings for this hall in date range
+            hall_query = {**query, 'hall_id': str(hall['_id'])}
+            hall_bookings = list(bookings_collection.find(hall_query))
+            
+            hall_stats['total_bookings'] = len(hall_bookings)
+            hall_stats['approved_bookings'] = len([b for b in hall_bookings if b['status'] == 'approved'])
+            hall_stats['pending_bookings'] = len([b for b in hall_bookings if b['status'] == 'pending'])
+            hall_stats['rejected_bookings'] = len([b for b in hall_bookings if b['status'] == 'rejected'])
+            
+            # Calculate utilization rate (approved bookings / total possible slots)
+            if start_date and end_date:
+                from datetime import datetime, timedelta
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                total_days = (end_dt - start_dt).days + 1
+                total_possible_slots = total_days * len(time_slots)
+                hall_stats['utilization_rate'] = round(
+                    (hall_stats['approved_bookings'] / total_possible_slots) * 100, 2
+                ) if total_possible_slots > 0 else 0
+            
+            utilization_data.append(hall_stats)
+        
+        if report_type.lower() == 'pdf':
+            return generate_pdf_report(utilization_data, 'Hall Utilization Report', f'Hall Utilization Report ({start_date} to {end_date})')
+        else:  # excel
+            return generate_excel_report(utilization_data, 'Utilization Report', f'utilization-report-{start_date}-to-{end_date}.xlsx')
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to generate utilization report',
+            'message': str(e)
+        }), 500
+
+def generate_pdf_report(data, title, filename):
+    """Generate PDF report (placeholder - requires reportlab library)"""
+    try:
+        # For now, return JSON data with instructions
+        # In production, you would use reportlab or similar to generate actual PDF
+        return jsonify({
+            'success': True,
+            'data': data,
+            'message': f'PDF generation not implemented yet. Install reportlab library and implement PDF generation.',
+            'filename': f'{filename.replace(" ", "-").lower()}.pdf',
+            'contentType': 'application/pdf',
+            'total_records': len(data)
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to generate PDF report',
+            'message': str(e)
+        }), 500
+
+def generate_excel_report(data, title, filename):
+    """Generate Excel report (placeholder - requires openpyxl library)"""
+    try:
+        # For now, return JSON data with instructions
+        # In production, you would use openpyxl or pandas to generate actual Excel file
+        return jsonify({
+            'success': True,
+            'data': data,
+            'message': f'Excel generation not implemented yet. Install openpyxl library and implement Excel generation.',
+            'filename': filename,
+            'contentType': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'total_records': len(data)
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to generate Excel report',
             'message': str(e)
         }), 500
 

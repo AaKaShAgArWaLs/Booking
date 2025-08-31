@@ -90,8 +90,15 @@ export default function RequirementScreen({ navigation }) {
   };
 
   const handleSubmit = async () => {
-    if (!validateForm()) return;
+    console.log('=== HANDLE SUBMIT STARTED ===');
+    console.log('Form validation started...');
     
+    if (!validateForm()) {
+      console.log('Form validation failed');
+      return;
+    }
+    
+    console.log('Form validation passed, setting loading to true');
     setLoading(true);
     updateForm(formData);
     
@@ -134,6 +141,8 @@ export default function RequirementScreen({ navigation }) {
           timeSlot: selectedTimeSlots.map(slot => slot.time).join(', '),
           booking_id: response.data?.booking_id || response.booking_id,
           bookingId: response.data?.booking_id || response.booking_id,
+          booking_date: selectedDate,
+          selectedDate: selectedDate,
           status: 'pending',
           submittedAt: new Date().toISOString(),
         };
@@ -177,6 +186,24 @@ export default function RequirementScreen({ navigation }) {
           <View style={styles.header}>
             <Text style={styles.title}>Event Requirements</Text>
             <View style={[globalStyles.card, styles.bookingSummary]}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Date:</Text>
+                <Text style={styles.summaryValue}>
+                  {selectedDate ? (() => {
+                    try {
+                      return new Date(selectedDate).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      });
+                    } catch (error) {
+                      console.error('Date formatting error:', error);
+                      return selectedDate;
+                    }
+                  })() : 'Not selected'}
+                </Text>
+              </View>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Hall:</Text>
                 <Text style={styles.summaryValue}>{selectedHall.name}</Text>
@@ -366,7 +393,11 @@ export default function RequirementScreen({ navigation }) {
         <View style={styles.footer}>
           <TouchableOpacity 
             style={[styles.submitButton, loading && styles.submitButtonDisabled]} 
-            onPress={handleSubmit}
+            onPress={() => {
+              console.log('Submit button pressed!');
+              Alert.alert('Button Test', 'Button is clickable!');
+              handleSubmit();
+            }}
             disabled={loading}
           >
             {loading ? (

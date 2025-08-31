@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Dimensions, ActivityIndicator, Alert } from 'react-native';
+import { colors } from '../styles/colors';
+import { globalStyles } from '../styles/globalStyles';
 import bookingAPI from '../services/bookingApi';
 
 const { width, height } = Dimensions.get('window');
@@ -60,6 +62,28 @@ export default function ConfirmationScreen({ route, navigation }) {
     });
   };
 
+  const formatBookingDate = (booking) => {
+    // Try to get the booking date from various possible fields
+    const bookingDateStr = booking.booking_date || booking.selectedDate || booking.date;
+    
+    if (bookingDateStr) {
+      try {
+        const date = new Date(bookingDateStr);
+        return date.toLocaleDateString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+      } catch (error) {
+        console.error('Error formatting booking date:', error);
+        return bookingDateStr;
+      }
+    }
+    
+    return 'Date not specified';
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -88,11 +112,17 @@ export default function ConfirmationScreen({ route, navigation }) {
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.successIcon}>✅</Text>
-          <Text style={styles.title}>Booking Request Submitted!</Text>
+          <View style={styles.successIconContainer}>
+            <Text style={styles.successIcon}>✅</Text>
+          </View>
+          <Text style={styles.title}>Booking Request Submitted Successfully!</Text>
           <Text style={styles.subtitle}>
-            Your booking request has been sent to the admin for approval
+            Thank you for your submission. Your booking request has been received and is now pending approval.
           </Text>
+          <View style={styles.bookingIdContainer}>
+            <Text style={styles.bookingIdLabel}>Booking Reference</Text>
+            <Text style={styles.bookingIdValue}>#{booking.booking_id || booking.bookingId}</Text>
+          </View>
         </View>
 
         {isLargeScreen ? (
@@ -124,8 +154,18 @@ export default function ConfirmationScreen({ route, navigation }) {
                 <Text style={styles.sectionTitle}>Event Information</Text>
                 
                 <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Booking Date:</Text>
+                  <Text style={styles.detailValue}>{formatBookingDate(booking)}</Text>
+                </View>
+
+                <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Hall:</Text>
                   <Text style={styles.detailValue}>{booking.hall.name}</Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Location:</Text>
+                  <Text style={styles.detailValue}>{booking.hall.location}</Text>
                 </View>
                 
                 <View style={styles.detailRow}>
@@ -208,8 +248,18 @@ export default function ConfirmationScreen({ route, navigation }) {
               <Text style={styles.sectionTitle}>Event Information</Text>
               
               <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Booking Date:</Text>
+                <Text style={styles.detailValue}>{formatBookingDate(booking)}</Text>
+              </View>
+
+              <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Hall:</Text>
                 <Text style={styles.detailValue}>{booking.hall.name}</Text>
+              </View>
+
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Location:</Text>
+                <Text style={styles.detailValue}>{booking.hall.location}</Text>
               </View>
               
               <View style={styles.detailRow}>
@@ -291,30 +341,64 @@ export default function ConfirmationScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.background,
     padding: getResponsiveValue(16, 20, 32),
   },
   header: {
     alignItems: 'center',
     marginBottom: getResponsiveValue(24, 32, 40),
+    backgroundColor: colors.white,
+    padding: getResponsiveValue(20, 24, 32),
+    borderRadius: getResponsiveValue(12, 16, 20),
+    ...globalStyles.shadow,
+  },
+  successIconContainer: {
+    backgroundColor: colors.success + '20',
+    width: getResponsiveValue(80, 100, 120),
+    height: getResponsiveValue(80, 100, 120),
+    borderRadius: getResponsiveValue(40, 50, 60),
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: getResponsiveValue(16, 20, 24),
   },
   successIcon: {
-    fontSize: getResponsiveValue(48, 64, 80),
-    marginBottom: getResponsiveValue(12, 16, 20),
+    fontSize: getResponsiveValue(36, 48, 60),
   },
   title: {
-    fontSize: getResponsiveValue(20, 24, 32),
+    fontSize: getResponsiveValue(18, 22, 28),
     fontWeight: 'bold',
-    color: '#27ae60',
+    color: colors.text,
     textAlign: 'center',
-    marginBottom: getResponsiveValue(6, 8, 12),
+    marginBottom: getResponsiveValue(8, 12, 16),
   },
   subtitle: {
     fontSize: getResponsiveValue(14, 16, 18),
-    color: '#666',
+    color: colors.textLight,
     textAlign: 'center',
     lineHeight: getResponsiveValue(20, 22, 26),
     maxWidth: isLargeScreen ? 600 : '100%',
+    marginBottom: getResponsiveValue(16, 20, 24),
+  },
+  bookingIdContainer: {
+    backgroundColor: colors.primary + '10',
+    paddingHorizontal: getResponsiveValue(16, 20, 24),
+    paddingVertical: getResponsiveValue(8, 12, 16),
+    borderRadius: getResponsiveValue(8, 10, 12),
+    borderWidth: 1,
+    borderColor: colors.primary + '30',
+  },
+  bookingIdLabel: {
+    fontSize: getResponsiveValue(12, 14, 16),
+    color: colors.textLight,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  bookingIdValue: {
+    fontSize: getResponsiveValue(16, 18, 20),
+    fontWeight: 'bold',
+    color: colors.primary,
+    textAlign: 'center',
+    letterSpacing: 1,
   },
   
   // Two-column layout styles
@@ -332,73 +416,54 @@ const styles = StyleSheet.create({
     marginLeft: 16,
   },
   bookingDetails: {
-    backgroundColor: 'white',
-    borderRadius: getResponsiveValue(8, 12, 16),
-    padding: getResponsiveValue(16, 20, 24),
-    marginBottom: getResponsiveValue(12, 16, 20),
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  eventDetails: {
-    backgroundColor: 'white',
-    borderRadius: getResponsiveValue(8, 12, 16),
-    padding: getResponsiveValue(16, 20, 24),
-    marginBottom: getResponsiveValue(12, 16, 20),
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  contactDetails: {
-    backgroundColor: 'white',
-    borderRadius: getResponsiveValue(8, 12, 16),
-    padding: getResponsiveValue(16, 20, 24),
-    marginBottom: getResponsiveValue(12, 16, 20),
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  descriptionSection: {
-    backgroundColor: 'white',
-    borderRadius: getResponsiveValue(8, 12, 16),
-    padding: getResponsiveValue(16, 20, 24),
-    marginBottom: getResponsiveValue(12, 16, 20),
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  nextSteps: {
-    backgroundColor: '#e8f4fd',
+    backgroundColor: colors.white,
     borderRadius: getResponsiveValue(8, 12, 16),
     padding: getResponsiveValue(16, 20, 24),
     marginBottom: getResponsiveValue(12, 16, 20),
     borderLeftWidth: 4,
-    borderLeftColor: '#3498db',
+    borderLeftColor: colors.success,
+    ...globalStyles.shadow,
+  },
+  eventDetails: {
+    backgroundColor: colors.white,
+    borderRadius: getResponsiveValue(8, 12, 16),
+    padding: getResponsiveValue(16, 20, 24),
+    marginBottom: getResponsiveValue(12, 16, 20),
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+    ...globalStyles.shadow,
+  },
+  contactDetails: {
+    backgroundColor: colors.white,
+    borderRadius: getResponsiveValue(8, 12, 16),
+    padding: getResponsiveValue(16, 20, 24),
+    marginBottom: getResponsiveValue(12, 16, 20),
+    borderLeftWidth: 4,
+    borderLeftColor: colors.secondary,
+    ...globalStyles.shadow,
+  },
+  descriptionSection: {
+    backgroundColor: colors.white,
+    borderRadius: getResponsiveValue(8, 12, 16),
+    padding: getResponsiveValue(16, 20, 24),
+    marginBottom: getResponsiveValue(12, 16, 20),
+    borderLeftWidth: 4,
+    borderLeftColor: colors.accent,
+    ...globalStyles.shadow,
+  },
+  nextSteps: {
+    backgroundColor: colors.primary + '10',
+    borderRadius: getResponsiveValue(8, 12, 16),
+    padding: getResponsiveValue(16, 20, 24),
+    marginBottom: getResponsiveValue(12, 16, 20),
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+    ...globalStyles.shadow,
   },
   sectionTitle: {
     fontSize: getResponsiveValue(16, 18, 22),
     fontWeight: 'bold',
-    color: '#2c3e50',
+    color: colors.text,
     marginBottom: getResponsiveValue(12, 16, 20),
   },
   detailRow: {
@@ -409,50 +474,51 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: getResponsiveValue(13, 14, 16),
-    color: '#666',
+    color: colors.textLight,
     flex: isSmallScreen ? 0 : 1,
     marginBottom: isSmallScreen ? 4 : 0,
   },
   detailValue: {
     fontSize: getResponsiveValue(13, 14, 16),
-    color: '#2c3e50',
+    color: colors.text,
     fontWeight: '500',
     flex: isSmallScreen ? 0 : 2,
     textAlign: isSmallScreen ? 'left' : 'right',
   },
   statusBadge: {
-    backgroundColor: '#f39c12',
+    backgroundColor: colors.warning,
     paddingHorizontal: getResponsiveValue(8, 12, 16),
     paddingVertical: getResponsiveValue(3, 4, 6),
     borderRadius: 16,
   },
   statusText: {
-    color: 'white',
+    color: colors.white,
     fontSize: getResponsiveValue(11, 12, 14),
     fontWeight: 'bold',
   },
   descriptionText: {
     fontSize: getResponsiveValue(13, 14, 16),
-    color: '#2c3e50',
+    color: colors.text,
     lineHeight: getResponsiveValue(18, 20, 24),
   },
   nextStepText: {
     fontSize: getResponsiveValue(13, 14, 16),
-    color: '#2c3e50',
+    color: colors.text,
     marginBottom: getResponsiveValue(6, 8, 10),
     lineHeight: getResponsiveValue(18, 20, 24),
   },
   newBookingButton: {
-    backgroundColor: '#3498db',
+    backgroundColor: colors.primary,
     paddingVertical: getResponsiveValue(14, 16, 20),
     paddingHorizontal: getResponsiveValue(20, 24, 32),
     borderRadius: getResponsiveValue(8, 10, 12),
     alignItems: 'center',
     marginTop: getResponsiveValue(12, 16, 20),
     minHeight: getResponsiveValue(48, 52, 60),
+    ...globalStyles.shadow,
   },
   newBookingButtonText: {
-    color: 'white',
+    color: colors.white,
     fontSize: getResponsiveValue(14, 16, 18),
     fontWeight: 'bold',
   },
@@ -464,7 +530,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: getResponsiveValue(14, 16, 18),
-    color: '#666',
+    color: colors.textLight,
     marginTop: 12,
   },
   errorContainer: {
@@ -475,19 +541,20 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: getResponsiveValue(16, 18, 20),
-    color: '#e74c3c',
+    color: colors.danger,
     textAlign: 'center',
     marginBottom: 20,
     fontWeight: 'bold',
   },
   backButton: {
-    backgroundColor: '#3498db',
+    backgroundColor: colors.primary,
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
+    ...globalStyles.shadow,
   },
   backButtonText: {
-    color: 'white',
+    color: colors.white,
     fontSize: getResponsiveValue(14, 16, 18),
     fontWeight: 'bold',
   },

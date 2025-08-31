@@ -9,6 +9,7 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { globalStyles } from '../styles/globalStyles';
 import { colors } from '../styles/colors';
@@ -39,14 +40,20 @@ const HomeScreen = ({ navigation }) => {
   const { selectHall } = useBooking();
   const [halls, setHalls] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadHalls();
   }, []);
 
-  const loadHalls = async () => {
+  const loadHalls = async (isRefresh = false) => {
     try {
-      setLoading(true);
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      
       const response = await bookingAPI.getHalls();
       console.log('API Response:', response);
       if (response.success) {
@@ -59,7 +66,11 @@ const HomeScreen = ({ navigation }) => {
       Alert.alert('Error', 'Something went wrong');
       console.error('Error loading halls:', error);
     } finally {
-      setLoading(false);
+      if (isRefresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
@@ -88,13 +99,20 @@ const HomeScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadHalls(true)}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
+      >
         <View style={styles.header}>
-          
           <Text style={styles.welcomeText}>Welcome to</Text>
-         <TouchableOpacity onPress={loadHalls}>
-  <Text style={styles.title}>Seminar Hall Booking</Text>
-</TouchableOpacity>
+          <Text style={styles.title}>Seminar Hall Booking</Text>
           <Text style={styles.subtitle}>Choose your perfect venue</Text>
         </View>
 

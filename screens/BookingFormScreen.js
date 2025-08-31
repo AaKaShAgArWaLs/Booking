@@ -78,7 +78,7 @@ export default function BookingFormScreen({ route, navigation }) {
       const bookingData = {
         hall_id: hall.id,
         time_slot_id: timeSlot.id || timeSlot.slot_id,
-        booking_date: selectedDate,
+        booking_date: typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().split('T')[0],
         requester_name: formData.name,
         email: formData.email,
         phone: formData.phone,

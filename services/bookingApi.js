@@ -1,8 +1,36 @@
-const API_BASE_URL = 'https://booking-seven-wheat.vercel.app'; // Change to your backend URL
+const API_BASE_URL = 'http://localhost:5000'; // Change to your backend URL
 
 class BookingAPI {
   constructor() {
     this.bookings = [];
+  }
+
+  // Test API connectivity
+  async testConnection() {
+    try {
+      console.log('🔗 Testing API connection to:', API_BASE_URL);
+      const response = await fetch(`${API_BASE_URL}/api/halls`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000 // 10 second timeout
+      });
+      
+      console.log('🔍 Connection test response:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ API connection successful, found', data.data?.length || 0, 'halls');
+        return { success: true, connected: true };
+      } else {
+        console.log('❌ API connection failed:', response.status, response.statusText);
+        return { success: false, connected: false, error: `HTTP ${response.status}` };
+      }
+    } catch (error) {
+      console.error('💥 API connection error:', error);
+      return { success: false, connected: false, error: error.message };
+    }
   }
 
   // Get all halls
@@ -22,18 +50,113 @@ class BookingAPI {
   }
 
   // Get available time slots for a specific hall and date
-  async getTimeSlots(hallId, selectedDate = null) {
+  async getTimeSlots(hallId, selectedDate = null, userContext = null) {
     try {
       const date = selectedDate || new Date().toISOString().split('T')[0];
-      const response = await fetch(`${API_BASE_URL}/api/halls/${hallId}/timeslots?date=${date}`);
-      const data = await response.json();
-      return data;
+      let url = `${API_BASE_URL}/api/halls/${hallId}/timeslots?date=${date}`;
+      
+      // Add user context to check for existing bookings
+      if (userContext && userContext.userId) {
+        url += `&userId=${userContext.userId}`;
+      }
+      if (userContext && userContext.userEmail) {
+        url += `&userEmail=${encodeURIComponent(userContext.userEmail)}`;
+      }
+      if (userContext && userContext.userPhone) {
+        url += `&userPhone=${encodeURIComponent(userContext.userPhone)}`;
+      }
+      
+      console.log('🚀 Making API request to:', url);
+      console.log('📝 Request params:', { hallId, date, userContext });
+      
+      // Add timeout to prevent infinite loading
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        clearTimeout(timeoutId);
+        console.log('📊 Response status:', response.status);
+      
+        if (!response.ok) {
+          console.error('❌ Network response was not ok:', response.status, response.statusText);
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('📦 Response data:', data);
+        
+        return data;
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          console.error('⏰ Request timed out after 10 seconds');
+          throw new Error('Request timed out. Please check your connection and try again.');
+        }
+        console.error('🚨 Fetch error:', fetchError);
+        throw fetchError;
+      }
     } catch (error) {
       console.error('Error fetching time slots:', error);
       return {
         success: false,
         error: 'Failed to load time slots. Please try again.',
         message: 'Unable to connect to the server'
+      };
+    }
+  }
+
+  // Get user's existing bookings for a specific date
+  async getUserBookingsForDate(date, userContext = {}) {
+    try {
+      const params = new URLSearchParams();
+      params.append('date', date);
+      
+      if (userContext.userId) {
+        params.append('userId', userContext.userId);
+      }
+      if (userContext.userEmail) {
+        params.append('userEmail', userContext.userEmail);
+      }
+      if (userContext.userPhone) {
+        params.append('userPhone', userContext.userPhone);
+      }
+      
+      const response = await fetch(`${API_BASE_URL}/api/bookings/user-bookings?${params.toString()}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching user bookings:', error);
+      return {
+        success: false,
+        error: 'Failed to check existing bookings',
+        message: 'Unable to connect to the server'
+      };
+    }
+  }
+
+  // Get all time slots for priority booking (including unavailable ones)
+  async getAllTimeSlots(hallId, selectedDate = null) {
+    try {
+      const date = selectedDate || new Date().toISOString().split('T')[0];
+      const response = await fetch(`${API_BASE_URL}/api/halls/${hallId}/timeslots?date=${date}&showAll=true&priority=true`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching all time slots:', error);
+      // Return default time slots as fallback
+      return {
+        success: true,
+        data: [
+          { id: 'slot1', slot_id: 'slot1', start_time: '08:45', end_time: '10:45', label: '8:45 AM - 10:45 AM' },
+          { id: 'slot2', slot_id: 'slot2', start_time: '11:00', end_time: '12:45', label: '11:00 AM - 12:45 PM' },
+          { id: 'slot3', slot_id: 'slot3', start_time: '13:00', end_time: '15:45', label: '1:00 PM - 3:45 PM' }
+        ]
       };
     }
   }
@@ -486,6 +609,104 @@ class BookingAPI {
       return {
         success: false,
         error: 'Failed to load admin logs',
+        message: 'Unable to connect to the server'
+      };
+    }
+  }
+
+  // Report Generation
+  async generateBookingReport(reportType, dateRange = {}) {
+    try {
+      const params = new URLSearchParams();
+      params.append('type', reportType); // 'pdf' or 'excel'
+      
+      if (dateRange.startDate) {
+        params.append('startDate', dateRange.startDate);
+      }
+      if (dateRange.endDate) {
+        params.append('endDate', dateRange.endDate);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/admin/reports/bookings?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        // For file downloads, we need to handle the blob
+        const blob = await response.blob();
+        const filename = response.headers.get('Content-Disposition')?.split('filename=')[1] || 
+                        `booking-report-${new Date().toISOString().split('T')[0]}.${reportType === 'pdf' ? 'pdf' : 'xlsx'}`;
+        
+        return {
+          success: true,
+          data: blob,
+          filename: filename.replace(/"/g, ''), // Remove quotes from filename
+          contentType: response.headers.get('Content-Type')
+        };
+      } else {
+        const data = await response.json();
+        return {
+          success: false,
+          error: data.error || 'Failed to generate report',
+          message: data.message || 'Server error occurred'
+        };
+      }
+    } catch (error) {
+      console.error('Error generating booking report:', error);
+      return {
+        success: false,
+        error: 'Failed to generate report',
+        message: 'Unable to connect to the server'
+      };
+    }
+  }
+
+  async generateHallUtilizationReport(reportType, dateRange = {}) {
+    try {
+      const params = new URLSearchParams();
+      params.append('type', reportType);
+      
+      if (dateRange.startDate) {
+        params.append('startDate', dateRange.startDate);
+      }
+      if (dateRange.endDate) {
+        params.append('endDate', dateRange.endDate);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/admin/reports/utilization?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const filename = response.headers.get('Content-Disposition')?.split('filename=')[1] || 
+                        `utilization-report-${new Date().toISOString().split('T')[0]}.${reportType === 'pdf' ? 'pdf' : 'xlsx'}`;
+        
+        return {
+          success: true,
+          data: blob,
+          filename: filename.replace(/"/g, ''),
+          contentType: response.headers.get('Content-Type')
+        };
+      } else {
+        const data = await response.json();
+        return {
+          success: false,
+          error: data.error || 'Failed to generate utilization report',
+          message: data.message || 'Server error occurred'
+        };
+      }
+    } catch (error) {
+      console.error('Error generating utilization report:', error);
+      return {
+        success: false,
+        error: 'Failed to generate utilization report',
         message: 'Unable to connect to the server'
       };
     }
