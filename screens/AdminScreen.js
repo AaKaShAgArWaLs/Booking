@@ -367,7 +367,7 @@ const AdminScreen = ({ navigation, route }) => {
 
   // Priority Booking Functions
   const handlePriorityBooking = () => {
-    console.log('Opening priority booking modal');
+    console.log('🔥 Opening priority booking modal');
     setPriorityBookingData({
       hall: '',
       date: '',
@@ -378,24 +378,50 @@ const AdminScreen = ({ navigation, route }) => {
       otherReason: ''
     });
     
-    // Initialize with default time slots for priority booking
+    // Initialize with comprehensive default time slots for priority booking
     const defaultTimeSlots = [
-      { id: 'slot1', slot_id: 'slot1', start_time: '08:45', end_time: '10:45', label: '8:45 AM - 10:45 AM' },
-      { id: 'slot2', slot_id: 'slot2', start_time: '11:00', end_time: '12:45', label: '11:00 AM - 12:45 PM' },
-      { id: 'slot3', slot_id: 'slot3', start_time: '13:00', end_time: '15:45', label: '1:00 PM - 3:45 PM' }
+      { 
+        id: 'slot1', 
+        slot_id: 'slot1', 
+        start_time: '08:45', 
+        end_time: '10:45', 
+        time: '8:45 AM - 10:45 AM',
+        label: '8:45 AM - 10:45 AM',
+        available: true
+      },
+      { 
+        id: 'slot2', 
+        slot_id: 'slot2', 
+        start_time: '11:00', 
+        end_time: '12:45', 
+        time: '11:00 AM - 12:45 PM',
+        label: '11:00 AM - 12:45 PM',
+        available: true
+      },
+      { 
+        id: 'slot3', 
+        slot_id: 'slot3', 
+        start_time: '13:00', 
+        end_time: '15:45', 
+        time: '1:00 PM - 3:45 PM',
+        label: '1:00 PM - 3:45 PM',
+        available: true
+      }
     ];
-    console.log('Setting default time slots:', defaultTimeSlots);
+    console.log('✅ Setting default time slots for priority booking:', defaultTimeSlots);
     setAvailableTimeSlots(defaultTimeSlots);
     
     const today = new Date();
     setSelectedDate(today);
     setTempSelectedDate(today);
+    setLoadingTimeSlots(false); // Ensure loading state is false
     setShowDatePicker(false);
     setPriorityModalVisible(true);
   };
 
   // Fetch time slots when hall and date are selected
   const handleHallOrDateChange = async (field, value) => {
+    console.log(`🔄 Handling ${field} change:`, value);
     const updatedData = { ...priorityBookingData, [field]: value };
     setPriorityBookingData(updatedData);
 
@@ -403,38 +429,65 @@ const AdminScreen = ({ navigation, route }) => {
     if (field === 'hall' || field === 'date') {
       updatedData.time = '';
       setPriorityBookingData(updatedData);
-      setAvailableTimeSlots([]);
     }
 
-    // Load time slots if both hall and date are selected
-    if (updatedData.hall && updatedData.date && (field === 'hall' || field === 'date')) {
+    // Load time slots if both hall and date are selected OR immediately when hall is selected
+    if ((updatedData.hall && updatedData.date && (field === 'hall' || field === 'date')) || 
+        (field === 'hall' && updatedData.hall)) {
+      
       setLoadingTimeSlots(true);
+      console.log('🕐 Loading time slots for priority booking...', { hall: updatedData.hall, date: updatedData.date });
+      
       try {
+        // Use current date if no date selected yet
+        const dateToUse = updatedData.date || new Date().toISOString().split('T')[0];
+        
         // For priority bookings, always try to get ALL time slots (including unavailable ones)
-        const response = await bookingAPI.getAllTimeSlots(updatedData.hall, updatedData.date);
-        if (response.success && response.data && response.data.length > 0) {
-          console.log('All time slots loaded for priority booking:', response.data);
+        const response = await bookingAPI.getAllTimeSlots(updatedData.hall, dateToUse);
+        
+        if (response.success && response.data && Array.isArray(response.data) && response.data.length > 0) {
+          console.log('✅ Time slots loaded successfully:', response.data);
           setAvailableTimeSlots(response.data);
         } else {
-          console.log('Fallback to default time slots for priority booking');
-          // Fallback to default time slots
-          const defaultTimeSlots = [
-            { id: 'slot1', slot_id: 'slot1', start_time: '08:45', end_time: '10:45', label: '8:45 AM - 10:45 AM' },
-            { id: 'slot2', slot_id: 'slot2', start_time: '11:00', end_time: '12:45', label: '11:00 AM - 12:45 PM' },
-            { id: 'slot3', slot_id: 'slot3', start_time: '13:00', end_time: '15:45', label: '1:00 PM - 3:45 PM' }
-          ];
-          setAvailableTimeSlots(defaultTimeSlots);
+          console.log('⚠️ No slots from API, using default slots');
+          throw new Error('No valid time slots returned from API');
         }
       } catch (error) {
-        console.error('Error loading time slots:', error);
-        // For priority booking, still provide default time slots even on error
+        console.error('❌ Error loading time slots:', error);
+        
+        // Always provide comprehensive default time slots for priority booking
         const defaultTimeSlots = [
-          { id: 'slot1', slot_id: 'slot1', start_time: '08:45', end_time: '10:45', label: '8:45 AM - 10:45 AM' },
-          { id: 'slot2', slot_id: 'slot2', start_time: '11:00', end_time: '12:45', label: '11:00 AM - 12:45 PM' },
-          { id: 'slot3', slot_id: 'slot3', start_time: '13:00', end_time: '15:45', label: '1:00 PM - 3:45 PM' }
+          { 
+            id: 'slot1', 
+            slot_id: 'slot1', 
+            start_time: '08:45', 
+            end_time: '10:45', 
+            time: '8:45 AM - 10:45 AM',
+            label: '8:45 AM - 10:45 AM',
+            available: true
+          },
+          { 
+            id: 'slot2', 
+            slot_id: 'slot2', 
+            start_time: '11:00', 
+            end_time: '12:45', 
+            time: '11:00 AM - 12:45 PM',
+            label: '11:00 AM - 12:45 PM',
+            available: true
+          },
+          { 
+            id: 'slot3', 
+            slot_id: 'slot3', 
+            start_time: '13:00', 
+            end_time: '15:45', 
+            time: '1:00 PM - 3:45 PM',
+            label: '1:00 PM - 3:45 PM',
+            available: true
+          }
         ];
+        
+        console.log('🔄 Using default time slots:', defaultTimeSlots);
         setAvailableTimeSlots(defaultTimeSlots);
-        console.log('Using default time slots for priority booking due to error');
       } finally {
         setLoadingTimeSlots(false);
       }
@@ -1252,60 +1305,84 @@ const AdminScreen = ({ navigation, route }) => {
 
               
               {/* Time Slot Dropdown */}
-              <View style={styles.dropdownContainer}>
-                <Text style={styles.dropdownLabel}>Time Slot *</Text>
-                <View style={[styles.pickerWrapper, loadingTimeSlots && styles.pickerLoading]}>
-                  {loadingTimeSlots ? (
-                    <View style={styles.loadingTimeSlots}>
-                      <ActivityIndicator size="small" color={colors.primary} />
-                      <Text style={styles.loadingText}>Loading time slots...</Text>
-                    </View>
-                  ) : (
-                    <Picker
-                      selectedValue={priorityBookingData.time}
-                      onValueChange={(value) => {
-                        console.log('Selected time slot value:', value);
-                        console.log('Available time slots:', availableTimeSlots);
-                        const selectedSlot = availableTimeSlots.find(slot => 
-                          (slot.id && slot.id === value) || 
-                          (slot.slot_id && slot.slot_id === value) || 
-                          `slot-${availableTimeSlots.indexOf(slot)}` === value
-                        );
-                        console.log('Found selected slot:', selectedSlot);
-                        setPriorityBookingData({...priorityBookingData, time: value});
-                      }}
-                      style={styles.picker}
-                      enabled={availableTimeSlots.length > 0}
-                    >
-                      {availableTimeSlots.length === 0 ? (
-                        <Picker.Item 
-                          label={priorityBookingData.hall && priorityBookingData.date ? "No slots available" : "Select hall and date first"} 
-                          value="" 
-                        />
-                      ) : (
-                        <>
-                          <Picker.Item label="Select Time Slot" value="" />
-                          {availableTimeSlots.map((slot, index) => {
-                            const displayLabel = slot.label || 
-                              (slot.start_time && slot.end_time ? `${slot.start_time} - ${slot.end_time}` : `Time Slot ${index + 1}`);
-                            
-                            // Ensure we always have a valid value - never undefined
-                            const slotValue = slot.id || slot.slot_id || `slot-${index}`;
-                            
-                            return (
-                              <Picker.Item 
-                                key={slotValue} 
-                                label={displayLabel} 
-                                value={slotValue} 
-                              />
-                            );
-                          })}
-                        </>
-                      )}
-                    </Picker>
-                  )}
-                </View>
-              </View>
+// In the Priority Booking Modal - Time Slot Dropdown section
+{/* Time Slot Dropdown */}
+<View style={styles.dropdownContainer}>
+  <Text style={styles.dropdownLabel}>Time Slot *</Text>
+  <View style={[styles.pickerWrapper, loadingTimeSlots && styles.pickerLoading]}>
+    {loadingTimeSlots ? (
+      <View style={styles.loadingTimeSlots}>
+        <ActivityIndicator size="small" color={colors.primary} />
+        <Text style={styles.loadingText}>Loading time slots...</Text>
+      </View>
+    ) : (
+      <Picker
+        selectedValue={priorityBookingData.time}
+        onValueChange={(value) => {
+          console.log('Selected time slot value:', value);
+          console.log('Available time slots:', availableTimeSlots);
+          setPriorityBookingData({...priorityBookingData, time: value});
+        }}
+        style={styles.picker}
+        enabled={availableTimeSlots.length > 0}
+      >
+        <Picker.Item label="Select Time Slot" value="" />
+        {availableTimeSlots.length === 0 ? (
+          <Picker.Item 
+            label={priorityBookingData.hall ? "Loading slots..." : "Select hall first"} 
+            value=""
+            enabled={false}
+          />
+        ) : (
+          availableTimeSlots.map((slot, index) => {
+            // Handle different data structures from API with priority to most reliable fields
+            const slotId = slot.slot_id || slot.id || slot._id || `fallback-slot-${index}`;
+            
+            // Build display label with fallbacks
+            let displayLabel;
+            if (slot.label) {
+              displayLabel = slot.label;
+            } else if (slot.time) {
+              displayLabel = slot.time;
+            } else if (slot.start_time && slot.end_time) {
+              // Convert 24h format to 12h format for better readability
+              const formatTime = (time) => {
+                const [hours, minutes] = time.split(':');
+                const hour24 = parseInt(hours);
+                const hour12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+                const ampm = hour24 >= 12 ? 'PM' : 'AM';
+                return `${hour12}:${minutes} ${ampm}`;
+              };
+              displayLabel = `${formatTime(slot.start_time)} - ${formatTime(slot.end_time)}`;
+            } else {
+              displayLabel = `Time Slot ${index + 1}`;
+            }
+            
+            // Add availability indicator for admin (they can book any slot but good to know)
+            const availabilityText = slot.available === false ? ' (Occupied)' : '';
+            const finalLabel = `${displayLabel}${availabilityText}`;
+            
+            console.log(`🎯 Time Slot ${index + 1}:`, {
+              slotId,
+              displayLabel: finalLabel,
+              available: slot.available,
+              originalSlot: slot
+            });
+            
+            return (
+              <Picker.Item 
+                key={`time-slot-${slotId}-${index}`}
+                label={finalLabel}
+                value={slotId}
+              />
+            );
+          })
+        )}
+      </Picker>
+    )}
+  </View>
+</View>
+
               
               {/* Department Dropdown */}
               <View style={styles.dropdownContainer}>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -49,6 +49,34 @@ const TimeSlotScreen = ({ navigation }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showUserIdentification, setShowUserIdentification] = useState(false);
   const [tempUserData, setTempUserData] = useState({ email: '', phone: '' });
+
+  // Pre-calculate available dates to prevent crashes
+  const availableDates = useMemo(() => {
+    const dates = [];
+    const today = new Date();
+    
+    try {
+      for (let i = 0; i < 30; i++) {
+        const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+        dates.push({
+          date: date,
+          isToday: i === 0,
+          displayText: date.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          }),
+          dateString: date.toDateString(),
+          id: `date-${i}-${date.getTime()}` // Unique ID for React keys
+        });
+      }
+    } catch (error) {
+      console.error('Error generating dates:', error);
+    }
+    
+    return dates;
+  }, []);
 
   useEffect(() => {
     if (!selectedHall) {
@@ -164,21 +192,31 @@ const TimeSlotScreen = ({ navigation }) => {
   };
 
   const handleDateChange = (date) => {
-    setSelectedDate(date);
-    // Update the global context with formatted date string
-    selectDate(date.toISOString().split('T')[0]);
-    setShowDatePicker(false);
-    // Clear selected slots when date changes
-    selectedTimeSlots.forEach(slot => toggleTimeSlot(slot));
+    try {
+      setSelectedDate(date);
+      // Update the global context with formatted date string
+      selectDate(date.toISOString().split('T')[0]);
+      setShowDatePicker(false);
+      // Clear selected slots when date changes
+      selectedTimeSlots.forEach(slot => toggleTimeSlot(slot));
+    } catch (error) {
+      console.error('Date change error:', error);
+      Alert.alert('Error', 'Failed to update date');
+    }
   };
 
   const formatDisplayDate = (date) => {
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    try {
+      return date.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return date.toString();
+    }
   };
 
   const isDateInPast = (date) => {
@@ -193,12 +231,37 @@ const TimeSlotScreen = ({ navigation }) => {
 
   const getMaximumDate = () => {
     const maxDate = new Date();
-    maxDate.setDate(maxDate.getDate() + 30); // 3 months ahead
+    maxDate.setDate(maxDate.getDate() + 30); // 30 days ahead
     return maxDate;
   };
 
   const isTimeSlotSelected = (timeSlot) => {
     return selectedTimeSlots.some(slot => slot.id === timeSlot.id);
+  };
+
+  const renderDateOption = ({ item: dateObj, index }) => {
+    const isSelected = dateObj.dateString === selectedDate.toDateString();
+    
+    return (
+      <TouchableOpacity
+        key={dateObj.id}
+        style={[
+          styles.dateOption,
+          isSelected && styles.selectedDateOption,
+          dateObj.isToday && styles.todayDateOption
+        ]}
+        onPress={() => handleDateChange(dateObj.date)}
+        activeOpacity={0.7}
+      >
+        <Text style={[
+          styles.dateOptionText,
+          isSelected && styles.selectedDateText,
+          dateObj.isToday && styles.todayDateText
+        ]}>
+          {dateObj.displayText} {dateObj.isToday && '(Today)'}
+        </Text>
+      </TouchableOpacity>
+    );
   };
 
   if (loading) {
@@ -259,7 +322,7 @@ const TimeSlotScreen = ({ navigation }) => {
           )}
           
           <Text style={styles.dateHint}>
-            You can book up to 3 months in advance
+            You can book up to 1 month in advance
           </Text>
           
           {selectedDate.getDay() === 0 && (
@@ -335,53 +398,50 @@ const TimeSlotScreen = ({ navigation }) => {
         </View>
       </ScrollView>
 
-      {/* Custom Date Picker Modal */}
+      {/* Custom Date Picker Modal - FIXED VERSION */}
       <Modal
         visible={showDatePicker}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowDatePicker(false)}
-        accessible={true}
-        accessibilityViewIsModal={true}
       >
-        <View 
-          style={styles.modalOverlay}
-          accessible={false}
-          importantForAccessibility="no-hide-descendants"
-        >
-          <View 
-            style={styles.datePickerModal}
-            accessible={true}
-            accessibilityRole="dialog"
-            accessibilityLabel="Select booking date"
-          >
+        <View style={styles.modalOverlay}>
+          <View style={styles.datePickerModal}>
             <Text style={styles.modalTitle}>Select Date</Text>
             
-            <ScrollView style={styles.dateScrollView} showsVerticalScrollIndicator={false}>
-              {/* Generate next 90 days */}
-              {Array.from({ length: 30 }, (_, index) => {
-                const date = new Date();
-                date.setDate(date.getDate() + index);
-                const isToday = index === 0;
-                const isSelected = date.toDateString() === selectedDate.toDateString();
+            <ScrollView 
+              style={styles.dateScrollView} 
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={Platform.OS === 'android'}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              initialNumToRender={10}
+              getItemLayout={(data, index) => ({
+                length: 60,
+                offset: 60 * index,
+                index,
+              })}
+            >
+              {availableDates.map((dateObj, index) => {
+                const isSelected = dateObj.dateString === selectedDate.toDateString();
                 
                 return (
                   <TouchableOpacity
-                    key={index}
+                    key={dateObj.id}
                     style={[
                       styles.dateOption,
                       isSelected && styles.selectedDateOption,
-                      isToday && styles.todayDateOption
+                      dateObj.isToday && styles.todayDateOption
                     ]}
-                    onPress={() => handleDateChange(date)}
+                    onPress={() => handleDateChange(dateObj.date)}
                     activeOpacity={0.7}
                   >
                     <Text style={[
                       styles.dateOptionText,
                       isSelected && styles.selectedDateText,
-                      isToday && styles.todayDateText
+                      dateObj.isToday && styles.todayDateText
                     ]}>
-                      {formatDisplayDate(date)} {isToday && '(Today)'}
+                      {dateObj.displayText} {dateObj.isToday && '(Today)'}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -404,20 +464,9 @@ const TimeSlotScreen = ({ navigation }) => {
         transparent={true}
         animationType="slide"
         onRequestClose={() => {}}
-        accessible={true}
-        accessibilityViewIsModal={true}
       >
-        <View 
-          style={styles.modalOverlay}
-          accessible={false}
-          importantForAccessibility="no-hide-descendants"
-        >
-          <View 
-            style={styles.userIdModal}
-            accessible={true}
-            accessibilityRole="dialog"
-            accessibilityLabel="User identification for booking"
-          >
+        <View style={styles.modalOverlay}>
+          <View style={styles.userIdModal}>
             <Text style={styles.modalTitle}>User Identification</Text>
             <Text style={styles.modalSubtitle}>
               To prevent double bookings, please provide your email or phone number
@@ -653,7 +702,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  // Date Picker Modal Styles
+  // Date Picker Modal Styles - FIXED
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -684,6 +733,7 @@ const styles = StyleSheet.create({
     padding: getResponsiveValue(12, 16, 20),
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    minHeight: 60, // Fixed height for performance optimization
   },
   selectedDateOption: {
     backgroundColor: colors.primary,

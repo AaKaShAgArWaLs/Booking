@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://booking-seven-wheat.vercel.app'; // Change to your backend URL
+const API_BASE_URL = 'https://booking-seven-wheat.vercel.app/'; // Change to your backend URL
 
 class BookingAPI {
   constructor() {
@@ -144,19 +144,68 @@ class BookingAPI {
   async getAllTimeSlots(hallId, selectedDate = null) {
     try {
       const date = selectedDate || new Date().toISOString().split('T')[0];
+      console.log('📞 Fetching ALL time slots for priority booking:', { hallId, date });
+      
       const response = await fetch(`${API_BASE_URL}/api/halls/${hallId}/timeslots?date=${date}&showAll=true&priority=true`);
+      
+      if (!response.ok) {
+        console.warn('⚠️ API request failed, using fallback time slots');
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
       const data = await response.json();
-      return data;
+      console.log('📦 API response for getAllTimeSlots:', data);
+      
+      // Ensure we always return time slots, even if API returns empty or malformed data
+      if (data.success && data.data && Array.isArray(data.data) && data.data.length > 0) {
+        console.log('✅ Using API time slots:', data.data);
+        return data;
+      } else {
+        console.log('⚠️ API returned empty/invalid data, using fallback');
+        throw new Error('Invalid API response');
+      }
     } catch (error) {
-      console.error('Error fetching all time slots:', error);
-      // Return default time slots as fallback
+      console.error('❌ Error fetching all time slots:', error);
+      console.log('🔄 Returning fallback time slots for priority booking');
+      
+      // Return comprehensive default time slots as fallback
+      const fallbackSlots = [
+        { 
+          id: 'slot1', 
+          slot_id: 'slot1', 
+          start_time: '08:45', 
+          end_time: '10:45', 
+          time: '8:45 AM - 10:45 AM',
+          label: '8:45 AM - 10:45 AM',
+          available: true,
+          priority_available: true
+        },
+        { 
+          id: 'slot2', 
+          slot_id: 'slot2', 
+          start_time: '11:00', 
+          end_time: '12:45', 
+          time: '11:00 AM - 12:45 PM',
+          label: '11:00 AM - 12:45 PM',
+          available: true,
+          priority_available: true
+        },
+        { 
+          id: 'slot3', 
+          slot_id: 'slot3', 
+          start_time: '13:00', 
+          end_time: '15:45', 
+          time: '1:00 PM - 3:45 PM',
+          label: '1:00 PM - 3:45 PM',
+          available: true,
+          priority_available: true
+        }
+      ];
+      
       return {
         success: true,
-        data: [
-          { id: 'slot1', slot_id: 'slot1', start_time: '08:45', end_time: '10:45', label: '8:45 AM - 10:45 AM' },
-          { id: 'slot2', slot_id: 'slot2', start_time: '11:00', end_time: '12:45', label: '11:00 AM - 12:45 PM' },
-          { id: 'slot3', slot_id: 'slot3', start_time: '13:00', end_time: '15:45', label: '1:00 PM - 3:45 PM' }
-        ]
+        data: fallbackSlots,
+        fallback: true
       };
     }
   }

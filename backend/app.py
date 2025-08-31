@@ -4,6 +4,7 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 from datetime import datetime, timedelta
 import os
+import mail
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -271,6 +272,8 @@ def create_booking():
         result = bookings_collection.insert_one(booking_doc)
         
         print(f"Booking created successfully: {booking_id}")
+
+        
         
         # Return success response
         return jsonify({
@@ -430,6 +433,26 @@ def approve_booking(booking_id):
             }), 404
         
         booking = bookings_collection.find_one({'booking_id': booking_id})
+        hall = halls_collection.find_one({'_id': ObjectId(booking['hall_id'])})
+        time_slot = time_slots_collection.find_one({'_id': ObjectId(booking['time_slot_id'])})
+        data = {
+            'requester_name': booking['name'],
+            'email': booking['email'],
+            'booking_date': booking['booking_date']
+        }
+
+        # Send confirmation email (optional)
+        try:
+            mail.send_conf(
+                user_name=data['requester_name'],
+                hall_name=hall['name']+', '+hall['location'],
+                date=data['booking_date'],
+                time=time_slot['time'],
+                user_email=data['email']
+            )
+        except Exception as e:
+            print(f"Failed to send confirmation email: {str(e)}")
+        print("Mail Sent")
         
         return jsonify({
             'success': True,
@@ -470,6 +493,31 @@ def reject_booking(booking_id):
             }), 404
         
         booking = bookings_collection.find_one({'booking_id': booking_id})
+
+        hall = halls_collection.find_one({'_id': ObjectId(booking['hall_id'])})
+        time_slot = time_slots_collection.find_one({'_id': ObjectId(booking['time_slot_id'])})
+        data = {
+            'requester_name': booking['name'],
+            'reason': booking.get('rejection_reason', 'No reason provided'),
+            'hall_name': hall['name']+', '+hall['location'],
+            'time': time_slot['time'],
+            'email': booking['email'],
+            'booking_date': booking['booking_date']
+        }
+        # Send rejection email (optional)
+        try:
+            mail.send_rej(
+                user_name=data['requester_name'],
+                hall_name=data['hall_name'],
+                date=data['booking_date'],
+                time=data['time'],
+                user_email=data['email'],
+                reason=data['reason']
+            )
+        except Exception as e:
+            print(f"Failed to send rejection email: {str(e)}")
+        
+        print("Mail Sent")
         
         return jsonify({
             'success': True,
