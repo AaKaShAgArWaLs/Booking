@@ -3,7 +3,7 @@ export const halls = [
     id: '1',
     name: 'Hall A',
     location: 'FET Ground Floor',
-    capacity: 100,
+    capacity: 250,
     features: ['Projector', 'AC', 'WiFi', 'Sound System', 'Whiteboard'],
     isAvailable: true,
     description: 'Located on the ground floor of FET building. Perfect for presentations and seminars with modern amenities.',

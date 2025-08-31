@@ -20,7 +20,6 @@ export default function BookingFormScreen({ route, navigation }) {
     name: '',
     email: '',
     phone: '',
-    organization: '',
     eventTitle: '',
     description: '',
     attendees: '',
