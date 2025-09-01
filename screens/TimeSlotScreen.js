@@ -19,6 +19,7 @@ import { useBooking } from '../context/BookingContext';
 import CustomCheckbox from '../components/CustomCheckbox';
 import CustomButton from '../components/CustomButton';
 import bookingAPI from '../services/bookingApi';
+import { formatDateForAPI, isSunday } from '../utils/dateUtils';
 
 const { width, height } = Dimensions.get('window');
 
@@ -33,6 +34,8 @@ const getResponsiveValue = (small, medium, large) => {
   if (isTablet) return medium;
   return small;
 };
+
+// Date formatting utility is now imported from utils/dateUtils.js
 
 const TimeSlotScreen = ({ navigation }) => {
   const { 
@@ -86,8 +89,8 @@ const TimeSlotScreen = ({ navigation }) => {
       return;
     }
     
-    // Initialize context with today's date
-    selectDate(selectedDate.toISOString().split('T')[0]);
+    // Initialize context with today's date (using local date to avoid timezone issues)
+    selectDate(formatDateForAPI(selectedDate));
     
     // Load time slots regardless of user identification - we can handle it during booking
     loadTimeSlots();
@@ -98,12 +101,18 @@ const TimeSlotScreen = ({ navigation }) => {
       setLoading(true);
       console.log('🔍 Loading time slots...');
       
-      // Format date for API call (YYYY-MM-DD)
-      const formattedDate = selectedDate.toISOString().split('T')[0];
+      // Format date for API call (YYYY-MM-DD) - using local date to avoid timezone issues
+      const formattedDate = formatDateForAPI(selectedDate);
       
       console.log('🔍 Loading time slots with params:', {
         hallId: selectedHall.id,
-        date: formattedDate
+        date: formattedDate,
+        selectedDateInfo: {
+          dateObject: selectedDate,
+          dayOfWeek: selectedDate.getDay(), // 0=Sunday, 1=Monday, etc.
+          dayName: selectedDate.toLocaleDateString('en-US', { weekday: 'long' }),
+          isSunday: selectedDate.getDay() === 0
+        }
       });
       
       // Get available time slots for the hall
@@ -194,8 +203,8 @@ const TimeSlotScreen = ({ navigation }) => {
   const handleDateChange = (date) => {
     try {
       setSelectedDate(date);
-      // Update the global context with formatted date string
-      selectDate(date.toISOString().split('T')[0]);
+      // Update the global context with formatted date string (using local date)
+      selectDate(formatDateForAPI(date));
       setShowDatePicker(false);
       // Clear selected slots when date changes
       selectedTimeSlots.forEach(slot => toggleTimeSlot(slot));
@@ -325,7 +334,7 @@ const TimeSlotScreen = ({ navigation }) => {
             You can book up to 1 month in advance
           </Text>
           
-          {selectedDate.getDay() === 0 && (
+          {isSunday(selectedDate) && (
             <View style={styles.sundayNotice}>
               <Text style={styles.sundayNoticeIcon}>ℹ️</Text>
               <Text style={styles.sundayNoticeText}>

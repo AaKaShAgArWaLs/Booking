@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Platform } from 'react-native';
 import { colors } from './colors';
 
 export const globalStyles = StyleSheet.create({
@@ -38,5 +38,25 @@ export const globalStyles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  // Global text input styles for production builds
+  textInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: colors.text,
+    backgroundColor: colors.white,
+    minHeight: 44,
+    textAlign: 'left',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 0,
+      color: colors.text,
+      placeholderTextColor: colors.textLight,
+    }),
   },
 });

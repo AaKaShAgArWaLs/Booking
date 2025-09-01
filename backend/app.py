@@ -646,8 +646,8 @@ def create_priority_booking():
     try:
         data = request.get_json()
         
-        # Generate booking ID with priority prefix
-        booking_id = f"PR{int(datetime.now().timestamp())}"
+        print(f"=== PRIORITY BOOKING REQUEST ===")
+        print(f"Data received: {data}")
         
         # Get hall and time slot details
         hall = halls_collection.find_one({'_id': ObjectId(data['hall_id'])})
@@ -658,6 +658,73 @@ def create_priority_booking():
                 'success': False,
                 'error': 'Invalid hall or time slot'
             }), 400
+        
+        print(f"Hall: {hall['name']}, Time Slot: {time_slot['time']}")
+        
+        # Check for existing bookings for the same hall, date, and time slot
+        existing_booking = bookings_collection.find_one({
+            'hall_id': data['hall_id'],
+            'time_slot_id': data['time_slot_id'], 
+            'booking_date': data['booking_date'],
+            'status': {'$in': ['pending', 'approved']}  # Check both pending and approved bookings
+        })
+        
+        if existing_booking:
+            print(f"❌ CONFLICT DETECTED: Existing booking found - {existing_booking['booking_id']}")
+            
+            # Get requester email for notification
+            requester_email = data.get('requester_email', 'admin@booking.com')
+            
+            # Send conflict notification email
+            try:
+                mail.send_priority_conflict(
+                    user_name=data['requester_name'],
+                    hall_name=f"{hall['name']}, {hall['location']}",
+                    date=data['booking_date'],
+                    time=time_slot['time'],
+                    user_email=requester_email,
+                    existing_booking_id=existing_booking['booking_id']
+                )
+                print("✅ Conflict notification email sent successfully")
+            except Exception as e:
+                print(f"⚠️ Failed to send conflict email: {str(e)}")
+            
+            # Log the conflict for admin tracking
+            admin_logs_collection.insert_one({
+                'admin_id': 'system',
+                'action': 'PRIORITY_BOOKING_CONFLICT',
+                'details': {
+                    'requested_hall': hall['name'],
+                    'requested_date': data['booking_date'],
+                    'requested_time': time_slot['time'],
+                    'requester_name': data['requester_name'],
+                    'requester_email': requester_email,
+                    'existing_booking_id': existing_booking['booking_id'],
+                    'existing_booker': existing_booking['name']
+                },
+                'timestamp': datetime.utcnow(),
+                'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+            })
+            
+            return jsonify({
+                'success': False,
+                'error': 'Booking conflict detected',
+                'message': f'There is already an existing booking (ID: {existing_booking["booking_id"]}) for this hall and time slot. A notification email has been sent to the requester.',
+                'conflict_details': {
+                    'existing_booking_id': existing_booking['booking_id'],
+                    'existing_booker': existing_booking['name'],
+                    'existing_event': existing_booking['event_title'],
+                    'conflict_hall': hall['name'],
+                    'conflict_date': data['booking_date'],
+                    'conflict_time': time_slot['time']
+                }
+            }), 409  # 409 Conflict status code
+        
+        # No conflict found, proceed with creating priority booking
+        print("✅ No conflict detected, creating priority booking...")
+        
+        # Generate booking ID with priority prefix
+        booking_id = f"PR{int(datetime.now().timestamp())}"
         
         # Create priority booking document
         booking_doc = {
@@ -682,6 +749,24 @@ def create_priority_booking():
         
         result = bookings_collection.insert_one(booking_doc)
         
+        # Log successful priority booking creation
+        admin_logs_collection.insert_one({
+            'admin_id': 'system',
+            'action': 'CREATE_PRIORITY_BOOKING_SUCCESS',
+            'details': {
+                'booking_id': booking_id,
+                'hall_name': hall['name'],
+                'booking_date': data['booking_date'],
+                'time_slot': time_slot['time'],
+                'requester_name': data['requester_name'],
+                'department': data['department']
+            },
+            'timestamp': datetime.utcnow(),
+            'ip_address': request.environ.get('REMOTE_ADDR', 'Unknown')
+        })
+        
+        print(f"✅ Priority booking created successfully: {booking_id}")
+        
         return jsonify({
             'success': True,
             'data': {
@@ -695,6 +780,7 @@ def create_priority_booking():
         })
     
     except Exception as e:
+        print(f"❌ Error creating priority booking: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Failed to create priority booking',

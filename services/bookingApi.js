@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://booking-seven-wheat.vercel.app/'; // Change to your backend URL
+const API_BASE_URL = 'https://booking-seven-wheat.vercel.app'; // Change to your backend URL
 
 class BookingAPI {
   constructor() {

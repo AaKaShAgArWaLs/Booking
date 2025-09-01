@@ -475,6 +475,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
     marginBottom: getResponsiveValue(6, 8, 10),
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   input: {
     backgroundColor: colors.white,
@@ -485,6 +489,16 @@ const styles = StyleSheet.create({
     fontSize: getResponsiveValue(14, 16, 18),
     color: colors.text,
     minHeight: getResponsiveValue(44, 48, 52),
+    // Ensure text visibility in production builds
+    textAlign: 'left',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+    // Android-specific properties for text visibility
+    ...(Platform.OS === 'android' && {
+      elevation: 0,
+      color: colors.text,
+      placeholderTextColor: colors.lightGray,
+    }),
   },
   textArea: {
     height: getResponsiveValue(80, 100, 120),
@@ -513,6 +527,10 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: getResponsiveValue(16, 18, 20),
     fontWeight: 'bold',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
   },
   errorContainer: {
     flex: 1,
@@ -536,5 +554,9 @@ const styles = StyleSheet.create({
     color: colors.white,
     ...typography.body,
     fontWeight: '600',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
   },
 });

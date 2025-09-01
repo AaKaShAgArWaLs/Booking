@@ -166,26 +166,7 @@ const AdminLoginScreen = ({ navigation }) => {
                 )}
               </TouchableOpacity>
 
-              {/* Backend Credentials Info */}
-              <View style={styles.demoInfo}>
-                <Text style={styles.demoTitle}>Available Admin Accounts:</Text>
-                <View style={styles.demoCredentials}>
-                  <Text style={styles.demoText}>👨‍💼 Super Admin:</Text>
-                  <Text style={styles.demoEmail}>admin@booking.com / admin123</Text>
-                </View>
-                <View style={styles.demoCredentials}>
-                  <Text style={styles.demoText}>🎓 Placement Officer:</Text>
-                  <Text style={styles.demoEmail}>placement@college.edu / place123</Text>
-                </View>
-                <View style={styles.demoCredentials}>
-                  <Text style={styles.demoText}>🏢 Head Office:</Text>
-                  <Text style={styles.demoEmail}>headoffice@org.com / head123</Text>
-                </View>
-                <View style={styles.demoCredentials}>
-                  <Text style={styles.demoText}>🏛️ Hall Manager:</Text>
-                  <Text style={styles.demoEmail}>manager@booking.com / manager123</Text>
-                </View>
-              </View>
+
             </View>
           </View>
 

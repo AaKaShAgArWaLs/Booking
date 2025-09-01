@@ -298,9 +298,12 @@ const AdminScreen = ({ navigation, route }) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 30);
     
+    // Format dates properly to avoid timezone issues
+    const formatDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    
     setReportDateRange({
-      startDate: startDate.toISOString().split('T')[0],
-      endDate: endDate.toISOString().split('T')[0]
+      startDate: formatDate(startDate),
+      endDate: formatDate(endDate)
     });
     setReportsModalVisible(true);
   };
@@ -375,6 +378,7 @@ const AdminScreen = ({ navigation, route }) => {
       department: '',
       purpose: '',
       requester: '',
+      requesterEmail: '',
       otherReason: ''
     });
     
@@ -440,7 +444,10 @@ const AdminScreen = ({ navigation, route }) => {
       
       try {
         // Use current date if no date selected yet
-        const dateToUse = updatedData.date || new Date().toISOString().split('T')[0];
+        const dateToUse = updatedData.date || (() => {
+          const today = new Date();
+          return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        })();
         
         // For priority bookings, always try to get ALL time slots (including unavailable ones)
         const response = await bookingAPI.getAllTimeSlots(updatedData.hall, dateToUse);
@@ -498,7 +505,7 @@ const AdminScreen = ({ navigation, route }) => {
   const handleDateSelection = (date) => {
     setSelectedDate(date);
     setTempSelectedDate(date);
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     handleHallOrDateChange('date', dateString);
     setShowDatePicker(false);
   };
@@ -603,22 +610,29 @@ const AdminScreen = ({ navigation, route }) => {
         ? priorityBookingData.otherReason 
         : priorityBookingData.department;
 
+      // Get requester email for conflict notifications
+      const requesterEmail = priorityBookingData.requesterEmail || 
+                            `${priorityBookingData.requester?.toLowerCase().replace(/\s+/g, '.')}@college.edu` ||
+                            'admin@booking.com';
+
       const bookingData = {
         hall_id: priorityBookingData.hall,
         time_slot_id: priorityBookingData.time,
         booking_date: priorityBookingData.date,
         requester_name: priorityBookingData.requester,
+        requester_email: requesterEmail,
         department: finalDepartment,
         purpose: priorityBookingData.purpose,
         notes: `Priority booking created by admin`,
         attendees: 50 // Default value
       };
 
+      console.log('🔥 Submitting priority booking:', bookingData);
       const response = await bookingAPI.createPriorityBooking(bookingData);
       
       if (response.success) {
         // Log admin action
-        await logAdminAction('CREATE_PRIORITY_BOOKING', {
+        await logAdminAction('CREATE_PRIORITY_BOOKING_SUCCESS', {
           hall_id: priorityBookingData.hall,
           booking_date: priorityBookingData.date,
           department: finalDepartment,
@@ -629,11 +643,50 @@ const AdminScreen = ({ navigation, route }) => {
         Alert.alert("Success", response.message || "Priority booking created successfully!");
         await loadDashboardData(); // Refresh data
       } else {
-        Alert.alert("Error", response.error || "Failed to create priority booking");
+        // Handle conflict specifically
+        if (response.error === 'Booking conflict detected' && response.conflict_details) {
+          const conflict = response.conflict_details;
+          
+          // Log the conflict for admin records
+          await logAdminAction('PRIORITY_BOOKING_CONFLICT', {
+            requested_hall: conflict.conflict_hall,
+            requested_date: conflict.conflict_date,
+            requested_time: conflict.conflict_time,
+            requester: priorityBookingData.requester,
+            existing_booking_id: conflict.existing_booking_id,
+            existing_booker: conflict.existing_booker,
+            conflict_email_sent: true
+          });
+
+          // Show detailed conflict information
+          Alert.alert(
+            "⚠️ Booking Conflict Detected", 
+            `Cannot create priority booking due to existing conflict:\n\n` +
+            `• Existing Booking ID: ${conflict.existing_booking_id}\n` +
+            `• Existing Booker: ${conflict.existing_booker}\n` +
+            `• Event: ${conflict.existing_event}\n\n` +
+            `📧 A notification email has been sent to the requester with alternative suggestions.\n\n` +
+            `Please coordinate with the existing booker or select a different time slot.`,
+            [
+              {
+                text: "Select Different Slot",
+                style: "default"
+              },
+              {
+                text: "Close",
+                style: "cancel",
+                onPress: () => setPriorityModalVisible(false)
+              }
+            ]
+          );
+        } else {
+          // Handle other errors
+          Alert.alert("Error", response.error || "Failed to create priority booking");
+        }
       }
     } catch (error) {
-      console.error('Error creating priority booking:', error);
-      Alert.alert("Error", "Failed to create priority booking");
+      console.error('❌ Error creating priority booking:', error);
+      Alert.alert("Error", "Failed to create priority booking. Please try again.");
     }
   };
 
@@ -1222,6 +1275,7 @@ const AdminScreen = ({ navigation, route }) => {
             <TextInput
               style={styles.input}
               placeholder="Enter reason for rejection"
+              placeholderTextColor={colors.textLight}
               value={rejectReason}
               onChangeText={setRejectReason}
             />
@@ -1406,6 +1460,7 @@ const AdminScreen = ({ navigation, route }) => {
                 <TextInput
                   style={styles.input}
                   placeholder="Specify reason for Other department *"
+                  placeholderTextColor={colors.textLight}
                   value={priorityBookingData.otherReason}
                   onChangeText={(text) => setPriorityBookingData({...priorityBookingData, otherReason: text})}
                 />
@@ -1414,6 +1469,7 @@ const AdminScreen = ({ navigation, route }) => {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 placeholder="Purpose of booking"
+                placeholderTextColor={colors.textLight}
                 value={priorityBookingData.purpose}
                 onChangeText={(text) => setPriorityBookingData({...priorityBookingData, purpose: text})}
                 multiline
@@ -1423,9 +1479,20 @@ const AdminScreen = ({ navigation, route }) => {
               
               <TextInput
                 style={styles.input}
-                placeholder="Requester Name"
+                placeholder="Requester Name *"
+                placeholderTextColor={colors.textLight}
                 value={priorityBookingData.requester}
                 onChangeText={(text) => setPriorityBookingData({...priorityBookingData, requester: text})}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Requester Email (for conflict notifications)"
+                placeholderTextColor={colors.textLight}
+                value={priorityBookingData.requesterEmail}
+                onChangeText={(text) => setPriorityBookingData({...priorityBookingData, requesterEmail: text})}
+                keyboardType="email-address"
+                autoCapitalize="none"
               />
               
             </ScrollView>
@@ -1478,8 +1545,9 @@ const AdminScreen = ({ navigation, route }) => {
             
             <ScrollView style={styles.datePickerContent} showsVerticalScrollIndicator={false}>
               {generateDateOptions().map((date, index) => {
-                const dateString = date.toISOString().split('T')[0];
-                const isSelected = tempSelectedDate.toISOString().split('T')[0] === dateString;
+                const dateString = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                const selectedString = `${tempSelectedDate.getFullYear()}-${String(tempSelectedDate.getMonth() + 1).padStart(2, '0')}-${String(tempSelectedDate.getDate()).padStart(2, '0')}`;
+                const isSelected = selectedString === dateString;
                 const displayDate = date.toLocaleDateString('en-GB', {
                   weekday: 'short',
                   day: '2-digit',
@@ -1538,6 +1606,7 @@ const AdminScreen = ({ navigation, route }) => {
             <TextInput
               style={styles.input}
               placeholder="Full Name *"
+              placeholderTextColor={colors.textLight}
               value={newAdminData.name}
               onChangeText={(text) => setNewAdminData({...newAdminData, name: text})}
             />
@@ -1545,6 +1614,7 @@ const AdminScreen = ({ navigation, route }) => {
             <TextInput
               style={styles.input}
               placeholder="Role (e.g., Super Admin, Placement Admin) *"
+              placeholderTextColor={colors.textLight}
               value={newAdminData.role}
               onChangeText={(text) => setNewAdminData({...newAdminData, role: text})}
             />
@@ -1552,6 +1622,7 @@ const AdminScreen = ({ navigation, route }) => {
             <TextInput
               style={styles.input}
               placeholder="Email Address *"
+              placeholderTextColor={colors.textLight}
               value={newAdminData.email}
               onChangeText={(text) => setNewAdminData({...newAdminData, email: text})}
               keyboardType="email-address"
@@ -1560,6 +1631,7 @@ const AdminScreen = ({ navigation, route }) => {
             <TextInput
               style={styles.input}
               placeholder={selectedAdmin ? "New Password (leave empty to keep current)" : "Password *"}
+              placeholderTextColor={colors.textLight}
               value={newAdminData.password}
               onChangeText={(text) => setNewAdminData({...newAdminData, password: text})}
               secureTextEntry
@@ -1606,6 +1678,7 @@ const AdminScreen = ({ navigation, route }) => {
             <TextInput
               style={styles.input}
               placeholder="Hall Name *"
+              placeholderTextColor={colors.textLight}
               value={newHallData.name}
               onChangeText={(text) => setNewHallData({...newHallData, name: text})}
             />
@@ -1613,6 +1686,7 @@ const AdminScreen = ({ navigation, route }) => {
             <TextInput
               style={styles.input}
               placeholder="Location *"
+              placeholderTextColor={colors.textLight}
               value={newHallData.location}
               onChangeText={(text) => setNewHallData({...newHallData, location: text})}
             />
@@ -1620,6 +1694,7 @@ const AdminScreen = ({ navigation, route }) => {
             <TextInput
               style={styles.input}
               placeholder="Capacity (number of people) *"
+              placeholderTextColor={colors.textLight}
               value={newHallData.capacity}
               onChangeText={(text) => setNewHallData({...newHallData, capacity: text})}
               keyboardType="numeric"
@@ -1871,6 +1946,10 @@ title: {
     position: 'relative',
     overflow: 'hidden',
     minHeight: getResponsiveValue(80, 100, 120),
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   primaryCard: {
     backgroundColor: colors.primary,
@@ -1939,6 +2018,10 @@ title: {
     marginBottom: 12,
     borderLeftWidth: 4,
     borderLeftColor: colors.primary,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   bookingHeader: {
     flexDirection: 'row',
@@ -2059,6 +2142,10 @@ title: {
     marginBottom: getResponsiveValue(12, 16, 20),
     padding: getResponsiveValue(12, 16, 20),
     marginRight: isLargeScreen ? 12 : 0,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   hallCardHeader: {
     flexDirection: 'row',
@@ -2068,12 +2155,20 @@ title: {
   hallCardIcon: {
     fontSize: 20,
     marginRight: 8,
+    // Ensure icon visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   hallCardName: {
     ...typography.body,
     color: colors.text,
     fontWeight: '600',
     flex: 1,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   hallCardBody: {
     marginBottom: 12,
@@ -2082,16 +2177,28 @@ title: {
     ...typography.small,
     color: colors.textLight,
     marginBottom: 4,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.textLight,
+    }),
   },
   hallCardCapacity: {
     ...typography.small,
     color: colors.textLight,
     marginBottom: 4,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.textLight,
+    }),
   },
   hallCardFeatures: {
     ...typography.small,
     color: colors.textLight,
     fontStyle: 'italic',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.textLight,
+    }),
   },
   hallCardFooter: {
     flexDirection: 'column',
@@ -2105,14 +2212,26 @@ title: {
     paddingVertical: 4,
     paddingHorizontal: 8,
     borderRadius: 4,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 1,
+    }),
   },
   hallAvailable: {
     color: colors.success,
     backgroundColor: '#E8F5E8',
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 1,
+    }),
   },
   hallUnavailable: {
     color: colors.danger,
     backgroundColor: '#FEE8E8',
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 1,
+    }),
   },
 
   // Quick Actions
@@ -2132,18 +2251,34 @@ title: {
     marginHorizontal: isSmallScreen ? 0 : getResponsiveValue(4, 6, 8),
     marginBottom: isSmallScreen ? 12 : 0,
     minHeight: getResponsiveValue(100, 120, 140),
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   quickActionBtnTablet: {
     maxWidth: 250,
     marginHorizontal: 12,
     minHeight: 150,
     paddingVertical: 36,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   priorityBtn: {
     backgroundColor: colors.warning,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   reportsBtn: {
     backgroundColor: colors.secondary,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   settingsBtn: {
     backgroundColor: colors.primary,
@@ -2175,11 +2310,19 @@ title: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
   },
   addButtonText: {
     ...typography.small,
     color: colors.white,
     fontWeight: '600',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
   },
   adminsContainer: {
     marginTop: 8,
@@ -2189,6 +2332,10 @@ title: {
     marginBottom: 12,
     borderLeftWidth: 4,
     borderLeftColor: colors.primary,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   adminHeader: {
     flexDirection: 'row',
@@ -2203,16 +2350,28 @@ title: {
     ...typography.h3,
     color: colors.text,
     marginBottom: 4,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   adminRole: {
     ...typography.body,
     color: colors.primary,
     fontWeight: '600',
     marginBottom: 4,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.primary,
+    }),
   },
   adminEmail: {
     ...typography.small,
     color: colors.textLight,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.textLight,
+    }),
   },
   adminActions: {
     alignItems: 'flex-end',
@@ -2233,12 +2392,24 @@ title: {
   adminStatusText: {
     ...typography.caption,
     fontWeight: 'bold',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   activeStatusText: {
     color: '#059669',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: '#059669',
+    }),
   },
   inactiveStatusText: {
     color: '#DC2626',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: '#DC2626',
+    }),
   },
   adminCardActions: {
     flexDirection: 'row',
@@ -2252,6 +2423,10 @@ title: {
     borderRadius: 6,
     alignItems: 'center',
     marginHorizontal: 4,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
   },
   editBtn: {
     backgroundColor: colors.primary,
@@ -2269,6 +2444,10 @@ title: {
     ...typography.small,
     color: colors.white,
     fontWeight: '600',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
   },
 
   // Modal Styles (Enhanced)
@@ -2277,6 +2456,10 @@ title: {
     backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
+    // Ensure proper modal rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 0,
+    }),
   },
   scrollModalContainer: {
     flexGrow: 1,
@@ -2291,6 +2474,10 @@ title: {
     width: getResponsiveValue('95%', '85%', '75%'),
     maxWidth: getResponsiveValue(350, 400, 500),
     ...globalStyles.shadow,
+    // Ensure proper modal rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 5,
+    }),
   },
   priorityModalContainer: {
     backgroundColor: colors.white,
@@ -2300,6 +2487,10 @@ title: {
     maxHeight: getResponsiveValue('90%', '85%', '80%'),
     ...globalStyles.shadow,
     flex: 0,
+    // Ensure proper modal rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 5,
+    }),
   },
   
   priorityModalContent: {
@@ -2316,18 +2507,32 @@ title: {
     fontWeight: '600',
     color: colors.text,
     marginBottom: 8,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   pickerWrapper: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: getResponsiveValue(8, 12, 16),
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
     minHeight: getResponsiveValue(44, 48, 52),
     justifyContent: 'center',
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 0,
+      backgroundColor: colors.white,
+    }),
   },
   picker: {
     height: getResponsiveValue(44, 48, 52),
     color: colors.text,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+      backgroundColor: colors.white,
+    }),
   },
   pickerLoading: {
     opacity: 0.6,
@@ -2347,25 +2552,60 @@ title: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: getResponsiveValue(8, 12, 16),
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
     paddingHorizontal: getResponsiveValue(12, 16, 20),
     paddingVertical: getResponsiveValue(12, 16, 20),
     minHeight: getResponsiveValue(44, 48, 52),
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 0,
+      backgroundColor: colors.white,
+    }),
   },
   datePickerText: {
     fontSize: getResponsiveValue(14, 16, 18),
     color: colors.text,
     flex: 1,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   datePickerIcon: {
     fontSize: getResponsiveValue(16, 18, 20),
     marginLeft: 10,
+    // Ensure icon visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   
   // Text Area Style
   textArea: {
     minHeight: getResponsiveValue(80, 90, 100),
     paddingTop: getResponsiveValue(12, 16, 20),
+  },
+  
+  // Enhanced Modal Input Styles for Production
+  modalInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: getResponsiveValue(8, 12, 16),
+    padding: getResponsiveValue(12, 16, 20),
+    marginBottom: getResponsiveValue(16, 20, 24),
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    backgroundColor: colors.white,
+    minHeight: getResponsiveValue(44, 48, 52),
+    textAlign: 'left',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+    // Force text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 0,
+      color: colors.text,
+      placeholderTextColor: colors.textLight,
+    }),
   },
   
   // Custom Date Picker Modal Styles
@@ -2450,6 +2690,10 @@ title: {
     color: colors.text,
     textAlign: 'center',
     marginBottom: getResponsiveValue(16, 20, 24),
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   input: {
     borderWidth: 1,
@@ -2459,8 +2703,23 @@ title: {
     marginBottom: getResponsiveValue(16, 20, 24),
     fontSize: getResponsiveValue(14, 16, 18),
     color: colors.text,
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
     minHeight: getResponsiveValue(44, 48, 52),
+    // Explicit text styling for production builds
+    textAlign: 'left',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+    // Android-specific properties
+    ...(Platform.OS === 'android' && {
+      elevation: 0,
+      color: colors.text,
+      placeholderTextColor: colors.textLight,
+    }),
+  },
+  textArea: {
+    minHeight: getResponsiveValue(80, 100, 120),
+    textAlignVertical: 'top',
+    paddingTop: getResponsiveValue(12, 16, 20),
   },
   modalActions: {
     flexDirection: isSmallScreen ? 'column' : 'row',
@@ -2482,21 +2741,41 @@ title: {
     marginHorizontal: isSmallScreen ? 0 : getResponsiveValue(4, 6, 8),
     marginBottom: isSmallScreen ? 10 : 0,
     minHeight: getResponsiveValue(44, 48, 52),
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
   },
   approve: {
     backgroundColor: colors.success,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
   },
   prioritySubmitBtn: {
     backgroundColor: colors.warning,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
   },
   reject: {
     backgroundColor: colors.gray,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
   },
   btnText: {
     fontSize: getResponsiveValue(14, 16, 18),
     color: colors.white,
     fontWeight: '600',
     textAlign: 'center',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
   },
   
   // Loading styles
@@ -2511,6 +2790,10 @@ title: {
     color: colors.textLight,
     marginLeft: 8,
     textAlign: 'center',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.textLight,
+    }),
   },
   
   // Empty state styles
@@ -2532,6 +2815,10 @@ title: {
     color: colors.text,
     marginBottom: getResponsiveValue(8, 12, 16),
     textAlign: 'center',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   emptyStateText: {
     fontSize: getResponsiveValue(14, 16, 18),
@@ -2540,10 +2827,18 @@ title: {
     lineHeight: getResponsiveValue(20, 24, 28),
     marginBottom: getResponsiveValue(20, 24, 32),
     maxWidth: getResponsiveValue(280, 350, 400),
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.textLight,
+    }),
   },
   emptyStateButton: {
     backgroundColor: colors.primary,
     paddingVertical: getResponsiveValue(12, 14, 16),
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
     paddingHorizontal: getResponsiveValue(20, 24, 32),
     borderRadius: getResponsiveValue(8, 10, 12),
     minHeight: getResponsiveValue(44, 48, 52),
@@ -2554,6 +2849,10 @@ title: {
     fontSize: getResponsiveValue(14, 16, 18),
     fontWeight: '600',
     textAlign: 'center',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
   },
 
   // Reports Modal Styles
@@ -2571,6 +2870,10 @@ title: {
     color: colors.text,
     marginRight: 12,
     minWidth: 50,
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
   },
   dateInput: {
     flex: 1,
@@ -2580,7 +2883,13 @@ title: {
     padding: getResponsiveValue(10, 12, 14),
     fontSize: getResponsiveValue(14, 16, 18),
     color: colors.text,
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 0,
+      color: colors.text,
+      backgroundColor: colors.white,
+    }),
   },
   reportButtonsContainer: {
     flexDirection: 'row',
@@ -2598,22 +2907,42 @@ title: {
     marginHorizontal: getResponsiveValue(4, 6, 8),
     minHeight: getResponsiveValue(48, 52, 56),
     ...globalStyles.shadow,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   pdfButton: {
     backgroundColor: colors.danger,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   excelButton: {
     backgroundColor: colors.success,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
   },
   reportButtonIcon: {
     fontSize: getResponsiveValue(20, 22, 24),
     marginRight: getResponsiveValue(8, 10, 12),
+    // Ensure icon visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
   },
   reportButtonText: {
     color: colors.white,
     fontSize: getResponsiveValue(14, 16, 18),
     fontWeight: '600',
     textAlign: 'center',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
   },
 });
 
