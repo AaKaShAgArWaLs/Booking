@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -1405,20 +1405,46 @@ def generate_booking_report():
         start_date = request.args.get('startDate')
         end_date = request.args.get('endDate')
         
-        # Build query for date range
+        # Build query for date range with proper date validation
         query = {}
+        
+        # Validate and normalize dates
+        if start_date:
+            try:
+                # Ensure date format is YYYY-MM-DD
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                start_date = start_dt.strftime('%Y-%m-%d')
+            except ValueError:
+                print(f"Invalid start_date format: {start_date}")
+                start_date = None
+                
+        if end_date:
+            try:
+                # Ensure date format is YYYY-MM-DD  
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                end_date = end_dt.strftime('%Y-%m-%d')
+            except ValueError:
+                print(f"Invalid end_date format: {end_date}")
+                end_date = None
+        
         if start_date and end_date:
             query['booking_date'] = {'$gte': start_date, '$lte': end_date}
+            print(f"Date range query: {start_date} to {end_date}")
         elif start_date:
             query['booking_date'] = {'$gte': start_date}
+            print(f"Start date query: from {start_date}")
         elif end_date:
             query['booking_date'] = {'$lte': end_date}
+            print(f"End date query: until {end_date}")
         else:
             # Default to last 30 days if no date range specified
             from datetime import timedelta
             end_date = datetime.now().strftime('%Y-%m-%d')
             start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
             query['booking_date'] = {'$gte': start_date, '$lte': end_date}
+            print(f"Default date range: {start_date} to {end_date}")
+        
+        print(f"MongoDB query: {query}")
         
         # Get bookings data
         bookings = list(bookings_collection.find(query).sort('booking_date', -1))
@@ -1465,20 +1491,46 @@ def generate_utilization_report():
         start_date = request.args.get('startDate')
         end_date = request.args.get('endDate')
         
-        # Build query for date range
+        # Build query for date range with proper date validation  
         query = {}
+        
+        # Validate and normalize dates
+        if start_date:
+            try:
+                # Ensure date format is YYYY-MM-DD
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                start_date = start_dt.strftime('%Y-%m-%d')
+            except ValueError:
+                print(f"Invalid start_date format: {start_date}")
+                start_date = None
+                
+        if end_date:
+            try:
+                # Ensure date format is YYYY-MM-DD
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                end_date = end_dt.strftime('%Y-%m-%d')
+            except ValueError:
+                print(f"Invalid end_date format: {end_date}")
+                end_date = None
+        
         if start_date and end_date:
             query['booking_date'] = {'$gte': start_date, '$lte': end_date}
+            print(f"Utilization date range query: {start_date} to {end_date}")
         elif start_date:
             query['booking_date'] = {'$gte': start_date}
+            print(f"Utilization start date query: from {start_date}")
         elif end_date:
             query['booking_date'] = {'$lte': end_date}
+            print(f"Utilization end date query: until {end_date}")
         else:
             # Default to last 30 days
             from datetime import timedelta
             end_date = datetime.now().strftime('%Y-%m-%d')
             start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
             query['booking_date'] = {'$gte': start_date, '$lte': end_date}
+            print(f"Default utilization date range: {start_date} to {end_date}")
+        
+        print(f"Utilization MongoDB query: {query}")
         
         # Get utilization statistics
         halls = list(halls_collection.find({'is_active': True}))
@@ -1532,19 +1584,100 @@ def generate_utilization_report():
         }), 500
 
 def generate_pdf_report(data, title, filename):
-    """Generate PDF report (placeholder - requires reportlab library)"""
+    """Generate PDF report using reportlab"""
     try:
-        # For now, return JSON data with instructions
-        # In production, you would use reportlab or similar to generate actual PDF
-        return jsonify({
-            'success': True,
-            'data': data,
-            'message': f'PDF generation not implemented yet. Install reportlab library and implement PDF generation.',
-            'filename': f'{filename.replace(" ", "-").lower()}.pdf',
-            'contentType': 'application/pdf',
-            'total_records': len(data)
-        }), 200
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from io import BytesIO
+        
+        # Create a BytesIO buffer
+        buffer = BytesIO()
+        
+        # Create the PDF document
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30,
+            alignment=1  # Center alignment
+        )
+        
+        # Add title
+        elements.append(Paragraph(title, title_style))
+        elements.append(Spacer(1, 20))
+        
+        if data:
+            # Create table data
+            if 'booking_id' in data[0]:  # Booking report
+                headers = ['Booking ID', 'Date', 'Hall', 'Time', 'Requester', 'Event', 'Status']
+                table_data = [headers]
+                for item in data:
+                    table_data.append([
+                        item.get('booking_id', ''),
+                        item.get('booking_date', ''),
+                        item.get('hall_name', ''),
+                        item.get('time_slot', ''),
+                        item.get('requester_name', ''),
+                        item.get('event_title', ''),
+                        item.get('status', '')
+                    ])
+            else:  # Utilization report
+                headers = ['Hall', 'Location', 'Bookings', 'Approved', 'Rejected', 'Utilization %']
+                table_data = [headers]
+                for item in data:
+                    table_data.append([
+                        item.get('hall_name', ''),
+                        item.get('location', ''),
+                        str(item.get('total_bookings', 0)),
+                        str(item.get('approved_bookings', 0)),
+                        str(item.get('rejected_bookings', 0)),
+                        f"{item.get('utilization_rate', 0)}%"
+                    ])
+            
+            # Create table
+            table = Table(table_data, repeatRows=1)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            
+            elements.append(table)
+        else:
+            elements.append(Paragraph("No data available for the selected date range.", styles['Normal']))
+        
+        # Build PDF
+        doc.build(elements)
+        
+        # Get the PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        
+        # Create response
+        response = make_response(pdf_data)
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}.pdf"'
+        response.headers['Content-Length'] = len(pdf_data)
+        
+        return response
+        
     except Exception as e:
+        print(f"PDF generation error: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Failed to generate PDF report',
@@ -1552,19 +1685,99 @@ def generate_pdf_report(data, title, filename):
         }), 500
 
 def generate_excel_report(data, title, filename):
-    """Generate Excel report (placeholder - requires openpyxl library)"""
+    """Generate Excel report using openpyxl"""
     try:
-        # For now, return JSON data with instructions
-        # In production, you would use openpyxl or pandas to generate actual Excel file
-        return jsonify({
-            'success': True,
-            'data': data,
-            'message': f'Excel generation not implemented yet. Install openpyxl library and implement Excel generation.',
-            'filename': filename,
-            'contentType': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'total_records': len(data)
-        }), 200
+        import pandas as pd
+        from io import BytesIO
+        
+        # Create a BytesIO buffer
+        buffer = BytesIO()
+        
+        if data:
+            # Convert data to DataFrame
+            if 'booking_id' in data[0]:  # Booking report
+                df = pd.DataFrame(data)
+                # Select and reorder columns
+                columns = ['booking_id', 'booking_date', 'hall_name', 'hall_location', 'time_slot', 
+                          'requester_name', 'requester_email', 'organization', 'event_title', 
+                          'attendees', 'status', 'submitted_at', 'approved_at', 'rejection_reason']
+                df = df.reindex(columns=[col for col in columns if col in df.columns])
+                # Rename columns for better readability
+                df = df.rename(columns={
+                    'booking_id': 'Booking ID',
+                    'booking_date': 'Date',
+                    'hall_name': 'Hall Name',
+                    'hall_location': 'Location',
+                    'time_slot': 'Time Slot',
+                    'requester_name': 'Requester Name',
+                    'requester_email': 'Email',
+                    'organization': 'Organization',
+                    'event_title': 'Event Title',
+                    'attendees': 'Attendees',
+                    'status': 'Status',
+                    'submitted_at': 'Submitted At',
+                    'approved_at': 'Approved At',
+                    'rejection_reason': 'Rejection Reason'
+                })
+            else:  # Utilization report
+                df = pd.DataFrame(data)
+                # Rename columns for better readability
+                df = df.rename(columns={
+                    'hall_name': 'Hall Name',
+                    'location': 'Location',
+                    'total_bookings': 'Total Bookings',
+                    'approved_bookings': 'Approved Bookings',
+                    'rejected_bookings': 'Rejected Bookings',
+                    'utilization_rate': 'Utilization Rate (%)'
+                })
+        else:
+            # Create empty DataFrame with message
+            df = pd.DataFrame({'Message': ['No data available for the selected date range']})
+        
+        # Write to Excel
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name=title, index=False)
+            
+            # Get the workbook and worksheet to format
+            workbook = writer.book
+            worksheet = writer.sheets[title]
+            
+            # Auto-adjust column widths
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            # Style the header row
+            from openpyxl.styles import Font, PatternFill
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            
+            for cell in worksheet[1]:
+                cell.font = header_font
+                cell.fill = header_fill
+        
+        # Get the Excel data
+        excel_data = buffer.getvalue()
+        buffer.close()
+        
+        # Create response
+        response = make_response(excel_data)
+        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.headers['Content-Length'] = len(excel_data)
+        
+        return response
+        
     except Exception as e:
+        print(f"Excel generation error: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Failed to generate Excel report',

@@ -18,6 +18,8 @@ import {
   Linking,
 } from "react-native";
 import { Picker } from '@react-native-picker/picker';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 // Remove DateTimePicker import as it's causing issues on Android
 import { colors } from "../styles/colors";
 import { typography } from "../styles/typography";
@@ -116,6 +118,74 @@ const AdminScreen = ({ navigation, route }) => {
     startDate: '',
     endDate: ''
   });
+  
+  // Enhanced date picker states
+  const [showStartDateModal, setShowStartDateModal] = useState(false);
+  const [showEndDateModal, setShowEndDateModal] = useState(false);
+  
+  // Date picker internal states
+  const [startDatePickerState, setStartDatePickerState] = useState({
+    selectedYear: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).getFullYear(),
+    selectedMonth: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).getMonth(),
+    selectedDay: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).getDate()
+  });
+  
+  const [endDatePickerState, setEndDatePickerState] = useState({
+    selectedYear: new Date().getFullYear(),
+    selectedMonth: new Date().getMonth(),
+    selectedDay: new Date().getDate()
+  });
+  
+  // Date formatting utilities
+  const formatDateValue = (year, month, day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const formatDateDisplay = (year, month, day) => {
+    const date = new Date(year, month, day);
+    const options = { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      weekday: 'short'
+    };
+    return date.toLocaleDateString('en-US', options);
+  };
+  
+  // Generate years (current year ± 5 years)
+  const generateYears = () => {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let year = currentYear - 5; year <= currentYear + 5; year++) {
+      years.push(year);
+    }
+    return years;
+  };
+  
+  // Month names
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  
+  // Get days in month
+  const getDaysInMonth = (year, month) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+  
+  // Generate days for selected month/year
+  const generateDays = (year, month) => {
+    const daysInMonth = getDaysInMonth(year, month);
+    const days = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      days.push(day);
+    }
+    return days;
+  };
+  
+  const [selectedStartDate, setSelectedStartDate] = useState(
+    formatDateValue(startDatePickerState.selectedYear, startDatePickerState.selectedMonth, startDatePickerState.selectedDay)
+  );
+  const [selectedEndDate, setSelectedEndDate] = useState(
+    formatDateValue(endDatePickerState.selectedYear, endDatePickerState.selectedMonth, endDatePickerState.selectedDay)
+  );
 
   useEffect(() => {
     loadDashboardData();
@@ -291,44 +361,124 @@ const AdminScreen = ({ navigation, route }) => {
     }
   };
 
+  // Date picker handlers
+  const onStartDateConfirm = () => {
+    const { selectedYear, selectedMonth, selectedDay } = startDatePickerState;
+    const dateValue = formatDateValue(selectedYear, selectedMonth, selectedDay);
+    setSelectedStartDate(dateValue);
+    setReportDateRange(prev => ({
+      ...prev,
+      startDate: dateValue
+    }));
+    setShowStartDateModal(false);
+  };
+  
+  const onEndDateConfirm = () => {
+    const { selectedYear, selectedMonth, selectedDay } = endDatePickerState;
+    const dateValue = formatDateValue(selectedYear, selectedMonth, selectedDay);
+    setSelectedEndDate(dateValue);
+    setReportDateRange(prev => ({
+      ...prev,
+      endDate: dateValue
+    }));
+    setShowEndDateModal(false);
+  };
+  
+  const updateStartDatePicker = (field, value) => {
+    setStartDatePickerState(prev => {
+      const newState = { ...prev, [field]: value };
+      // Adjust day if it's invalid for the new month/year
+      if (field === 'selectedMonth' || field === 'selectedYear') {
+        const maxDays = getDaysInMonth(newState.selectedYear, newState.selectedMonth);
+        if (newState.selectedDay > maxDays) {
+          newState.selectedDay = maxDays;
+        }
+      }
+      return newState;
+    });
+  };
+  
+  const updateEndDatePicker = (field, value) => {
+    setEndDatePickerState(prev => {
+      const newState = { ...prev, [field]: value };
+      // Adjust day if it's invalid for the new month/year
+      if (field === 'selectedMonth' || field === 'selectedYear') {
+        const maxDays = getDaysInMonth(newState.selectedYear, newState.selectedMonth);
+        if (newState.selectedDay > maxDays) {
+          newState.selectedDay = maxDays;
+        }
+      }
+      return newState;
+    });
+  };
+
   // Generate Reports
   const handleGenerateReports = () => {
-    // Initialize date range to last 30 days by default
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 30);
-    
-    // Format dates properly to avoid timezone issues
-    const formatDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    
+    // Initialize date range with current selected dates
     setReportDateRange({
-      startDate: formatDate(startDate),
-      endDate: formatDate(endDate)
+      startDate: selectedStartDate,
+      endDate: selectedEndDate
     });
     setReportsModalVisible(true);
   };
 
-  // Download file function for React Native
+  // Download file function for React Native and Web
   const downloadFile = async (blob, filename) => {
     try {
       if (Platform.OS === 'web') {
-        // Web platform - create download link
+        // Web implementation - fix blob handling for proper file download
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.setAttribute('download', filename);
+        link.style.display = 'none';
         document.body.appendChild(link);
         link.click();
-        link.remove();
+        document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
       } else {
-        // React Native - you would typically use a library like react-native-fs or expo-file-system
-        // For now, we'll show an alert with the blob data
-        Alert.alert(
-          'Report Generated',
-          `Report "${filename}" has been generated successfully. In a production app, this would be saved to your device's downloads folder.`,
-          [{ text: 'OK' }]
-        );
+        // Mobile implementation using expo-file-system
+        try {
+          // Convert blob to base64
+          const reader = new FileReader();
+          const base64Data = await new Promise((resolve, reject) => {
+            reader.onload = () => {
+              const result = reader.result;
+              // Remove data:application/xxx;base64, prefix
+              const base64 = result.split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+
+          // Create file URI
+          const fileUri = FileSystem.documentDirectory + filename;
+          
+          // Write the file
+          await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          // Check if sharing is available
+          const isAvailable = await Sharing.isAvailableAsync();
+          if (isAvailable) {
+            await Sharing.shareAsync(fileUri, {
+              mimeType: filename.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              dialogTitle: `Share ${filename}`,
+              UTI: filename.endsWith('.pdf') ? 'com.adobe.pdf' : 'org.openxmlformats.spreadsheetml.sheet'
+            });
+          } else {
+            Alert.alert(
+              'File Saved',
+              `Report "${filename}" has been saved to your device's documents folder.`,
+              [{ text: 'OK' }]
+            );
+          }
+        } catch (mobileError) {
+          console.error('Mobile file save error:', mobileError);
+          Alert.alert('Error', `Failed to save the report file: ${mobileError.message}`);
+        }
       }
     } catch (error) {
       console.error('Error downloading file:', error);
@@ -510,8 +660,8 @@ const AdminScreen = ({ navigation, route }) => {
     setShowDatePicker(false);
   };
 
-  // Generate date options for the next 30 days
-  const generateDateOptions = () => {
+  // Generate date options for the next 30 days (for priority booking)
+  const generatePriorityBookingDateOptions = () => {
     const dates = [];
     for (let i = 0; i < 30; i++) {
       const date = new Date();
@@ -1544,7 +1694,7 @@ const AdminScreen = ({ navigation, route }) => {
             </View>
             
             <ScrollView style={styles.datePickerContent} showsVerticalScrollIndicator={false}>
-              {generateDateOptions().map((date, index) => {
+              {generatePriorityBookingDateOptions().map((date, index) => {
                 const dateString = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
                 const selectedString = `${tempSelectedDate.getFullYear()}-${String(tempSelectedDate.getMonth() + 1).padStart(2, '0')}-${String(tempSelectedDate.getDate()).padStart(2, '0')}`;
                 const isSelected = selectedString === dateString;
@@ -1762,23 +1912,227 @@ const AdminScreen = ({ navigation, route }) => {
             <View style={styles.dateRangeContainer}>
               <View style={styles.dateInputContainer}>
                 <Text style={styles.dateLabel}>From:</Text>
-                <TextInput
-                  style={styles.dateInput}
-                  placeholder="YYYY-MM-DD"
-                  value={reportDateRange.startDate}
-                  onChangeText={(text) => setReportDateRange({...reportDateRange, startDate: text})}
-                />
+                <TouchableOpacity 
+                  style={styles.datePickerButton}
+                  onPress={() => setShowStartDateModal(true)}
+                >
+                  <Text style={styles.datePickerText}>
+                    {formatDateDisplay(startDatePickerState.selectedYear, startDatePickerState.selectedMonth, startDatePickerState.selectedDay)}
+                  </Text>
+                  <Text style={styles.datePickerIcon}>📅</Text>
+                </TouchableOpacity>
               </View>
               <View style={styles.dateInputContainer}>
                 <Text style={styles.dateLabel}>To:</Text>
-                <TextInput
-                  style={styles.dateInput}
-                  placeholder="YYYY-MM-DD"
-                  value={reportDateRange.endDate}
-                  onChangeText={(text) => setReportDateRange({...reportDateRange, endDate: text})}
-                />
+                <TouchableOpacity 
+                  style={styles.datePickerButton}
+                  onPress={() => setShowEndDateModal(true)}
+                >
+                  <Text style={styles.datePickerText}>
+                    {formatDateDisplay(endDatePickerState.selectedYear, endDatePickerState.selectedMonth, endDatePickerState.selectedDay)}
+                  </Text>
+                  <Text style={styles.datePickerIcon}>📅</Text>
+                </TouchableOpacity>
               </View>
             </View>
+
+            {/* Start Date Picker Modal */}
+            <Modal
+              visible={showStartDateModal}
+              transparent
+              animationType="slide"
+              onRequestClose={() => setShowStartDateModal(false)}
+            >
+              <View style={styles.datePickerModalOverlay}>
+                <View style={styles.datePickerModalContainer}>
+                  <Text style={styles.datePickerModalTitle}>Select Start Date</Text>
+                  
+                  {/* Year Selection */}
+                  <Text style={styles.datePickerSectionLabel}>Year</Text>
+                  <View style={styles.datePickerRow}>
+                    {generateYears().map((year) => (
+                      <TouchableOpacity
+                        key={year}
+                        style={[
+                          styles.datePickerItem,
+                          startDatePickerState.selectedYear === year && styles.selectedDatePickerItem
+                        ]}
+                        onPress={() => updateStartDatePicker('selectedYear', year)}
+                      >
+                        <Text style={[
+                          styles.datePickerItemText,
+                          startDatePickerState.selectedYear === year && styles.selectedDatePickerItemText
+                        ]}>
+                          {year}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  
+                  {/* Month Selection */}
+                  <Text style={styles.datePickerSectionLabel}>Month</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.datePickerRow}>
+                    {months.map((month, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={[
+                          styles.datePickerItem,
+                          styles.monthPickerItem,
+                          startDatePickerState.selectedMonth === index && styles.selectedDatePickerItem
+                        ]}
+                        onPress={() => updateStartDatePicker('selectedMonth', index)}
+                      >
+                        <Text style={[
+                          styles.datePickerItemText,
+                          startDatePickerState.selectedMonth === index && styles.selectedDatePickerItemText
+                        ]}>
+                          {month.substring(0, 3)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  
+                  {/* Day Selection */}
+                  <Text style={styles.datePickerSectionLabel}>Day</Text>
+                  <ScrollView style={styles.dayPickerContainer}>
+                    <View style={styles.dayPickerGrid}>
+                      {generateDays(startDatePickerState.selectedYear, startDatePickerState.selectedMonth).map((day) => (
+                        <TouchableOpacity
+                          key={day}
+                          style={[
+                            styles.dayPickerItem,
+                            startDatePickerState.selectedDay === day && styles.selectedDatePickerItem
+                          ]}
+                          onPress={() => updateStartDatePicker('selectedDay', day)}
+                        >
+                          <Text style={[
+                            styles.datePickerItemText,
+                            startDatePickerState.selectedDay === day && styles.selectedDatePickerItemText
+                          ]}>
+                            {day}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                  
+                  {/* Action Buttons */}
+                  <View style={styles.datePickerActions}>
+                    <TouchableOpacity
+                      style={styles.datePickerCancelButton}
+                      onPress={() => setShowStartDateModal(false)}
+                    >
+                      <Text style={styles.datePickerCancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.datePickerConfirmButton}
+                      onPress={onStartDateConfirm}
+                    >
+                      <Text style={styles.datePickerConfirmButtonText}>Confirm</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+
+            {/* End Date Picker Modal */}
+            <Modal
+              visible={showEndDateModal}
+              transparent
+              animationType="slide"
+              onRequestClose={() => setShowEndDateModal(false)}
+            >
+              <View style={styles.datePickerModalOverlay}>
+                <View style={styles.datePickerModalContainer}>
+                  <Text style={styles.datePickerModalTitle}>Select End Date</Text>
+                  
+                  {/* Year Selection */}
+                  <Text style={styles.datePickerSectionLabel}>Year</Text>
+                  <View style={styles.datePickerRow}>
+                    {generateYears().map((year) => (
+                      <TouchableOpacity
+                        key={year}
+                        style={[
+                          styles.datePickerItem,
+                          endDatePickerState.selectedYear === year && styles.selectedDatePickerItem
+                        ]}
+                        onPress={() => updateEndDatePicker('selectedYear', year)}
+                      >
+                        <Text style={[
+                          styles.datePickerItemText,
+                          endDatePickerState.selectedYear === year && styles.selectedDatePickerItemText
+                        ]}>
+                          {year}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  
+                  {/* Month Selection */}
+                  <Text style={styles.datePickerSectionLabel}>Month</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.datePickerRow}>
+                    {months.map((month, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={[
+                          styles.datePickerItem,
+                          styles.monthPickerItem,
+                          endDatePickerState.selectedMonth === index && styles.selectedDatePickerItem
+                        ]}
+                        onPress={() => updateEndDatePicker('selectedMonth', index)}
+                      >
+                        <Text style={[
+                          styles.datePickerItemText,
+                          endDatePickerState.selectedMonth === index && styles.selectedDatePickerItemText
+                        ]}>
+                          {month.substring(0, 3)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  
+                  {/* Day Selection */}
+                  <Text style={styles.datePickerSectionLabel}>Day</Text>
+                  <ScrollView style={styles.dayPickerContainer}>
+                    <View style={styles.dayPickerGrid}>
+                      {generateDays(endDatePickerState.selectedYear, endDatePickerState.selectedMonth).map((day) => (
+                        <TouchableOpacity
+                          key={day}
+                          style={[
+                            styles.dayPickerItem,
+                            endDatePickerState.selectedDay === day && styles.selectedDatePickerItem
+                          ]}
+                          onPress={() => updateEndDatePicker('selectedDay', day)}
+                        >
+                          <Text style={[
+                            styles.datePickerItemText,
+                            endDatePickerState.selectedDay === day && styles.selectedDatePickerItemText
+                          ]}>
+                            {day}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                  
+                  {/* Action Buttons */}
+                  <View style={styles.datePickerActions}>
+                    <TouchableOpacity
+                      style={styles.datePickerCancelButton}
+                      onPress={() => setShowEndDateModal(false)}
+                    >
+                      <Text style={styles.datePickerCancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.datePickerConfirmButton}
+                      onPress={onEndDateConfirm}
+                    >
+                      <Text style={styles.datePickerConfirmButtonText}>Confirm</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
 
             {/* Report Type Selection */}
             <Text style={styles.sectionTitle}>📋 Booking Reports</Text>
@@ -2889,6 +3243,200 @@ title: {
       elevation: 0,
       color: colors.text,
       backgroundColor: colors.white,
+    }),
+  },
+  datePickerButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: getResponsiveValue(8, 10, 12),
+    padding: getResponsiveValue(12, 14, 16),
+    backgroundColor: colors.white,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
+  },
+  datePickerText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    fontWeight: '500',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
+  },
+  datePickerIcon: {
+    fontSize: getResponsiveValue(16, 18, 20),
+    marginLeft: getResponsiveValue(8, 10, 12),
+    // Ensure icon visibility in production builds
+    ...(Platform.OS === 'android' && {
+      fontSize: getResponsiveValue(16, 18, 20),
+    }),
+  },
+  
+  // Enhanced Date Picker Modal Styles
+  datePickerModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: getResponsiveValue(20, 24, 28),
+  },
+  datePickerModalContainer: {
+    backgroundColor: colors.white,
+    borderRadius: getResponsiveValue(16, 20, 24),
+    padding: getResponsiveValue(24, 28, 32),
+    width: '95%',
+    maxHeight: '80%',
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 15,
+    }),
+  },
+  datePickerModalTitle: {
+    fontSize: getResponsiveValue(20, 22, 24),
+    fontWeight: 'bold',
+    color: colors.primary,
+    textAlign: 'center',
+    marginBottom: getResponsiveValue(20, 24, 28),
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.primary,
+    }),
+  },
+  datePickerSectionLabel: {
+    fontSize: getResponsiveValue(16, 18, 20),
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: getResponsiveValue(8, 10, 12),
+    marginTop: getResponsiveValue(12, 16, 20),
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
+  },
+  datePickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: getResponsiveValue(16, 20, 24),
+  },
+  datePickerItem: {
+    paddingVertical: getResponsiveValue(8, 10, 12),
+    paddingHorizontal: getResponsiveValue(12, 16, 20),
+    borderRadius: getResponsiveValue(8, 10, 12),
+    borderWidth: 1,
+    borderColor: colors.lightGray,
+    backgroundColor: colors.white,
+    marginBottom: getResponsiveValue(8, 10, 12),
+    minWidth: getResponsiveValue(60, 70, 80),
+    alignItems: 'center',
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 1,
+    }),
+  },
+  monthPickerItem: {
+    marginRight: getResponsiveValue(8, 10, 12),
+  },
+  selectedDatePickerItem: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
+  },
+  datePickerItemText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    fontWeight: '500',
+    textAlign: 'center',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
+  },
+  selectedDatePickerItemText: {
+    color: colors.white,
+    fontWeight: '600',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
+    }),
+  },
+  dayPickerContainer: {
+    maxHeight: getResponsiveValue(200, 250, 300),
+    marginBottom: getResponsiveValue(20, 24, 28),
+  },
+  dayPickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  dayPickerItem: {
+    width: '13%', // ~7 items per row with spacing
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: getResponsiveValue(6, 8, 10),
+    borderWidth: 1,
+    borderColor: colors.lightGray,
+    backgroundColor: colors.white,
+    marginBottom: getResponsiveValue(6, 8, 10),
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 1,
+    }),
+  },
+  datePickerActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: getResponsiveValue(20, 24, 28),
+    gap: getResponsiveValue(12, 16, 20),
+  },
+  datePickerCancelButton: {
+    flex: 1,
+    backgroundColor: colors.lightGray,
+    paddingVertical: getResponsiveValue(12, 16, 20),
+    borderRadius: getResponsiveValue(8, 10, 12),
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 2,
+    }),
+  },
+  datePickerConfirmButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    paddingVertical: getResponsiveValue(12, 16, 20),
+    borderRadius: getResponsiveValue(8, 10, 12),
+    // Ensure proper rendering in production builds
+    ...(Platform.OS === 'android' && {
+      elevation: 3,
+    }),
+  },
+  datePickerCancelButtonText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.text,
+    textAlign: 'center',
+    fontWeight: '600',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.text,
+    }),
+  },
+  datePickerConfirmButtonText: {
+    fontSize: getResponsiveValue(14, 16, 18),
+    color: colors.white,
+    textAlign: 'center',
+    fontWeight: '600',
+    // Ensure text visibility in production builds
+    ...(Platform.OS === 'android' && {
+      color: colors.white,
     }),
   },
   reportButtonsContainer: {
